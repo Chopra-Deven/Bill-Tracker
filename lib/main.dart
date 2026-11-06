@@ -26,7 +26,11 @@ Future<void> main() async {
     debugPrint('auth init: $e');
   }
   await st.load();
-  await finishInterruptedLogout();
+  try {
+    await finishInterruptedLogout();
+  } catch (e) {
+    debugPrint('finish logout: $e');
+  }
   setUpSync();
   st.onChanged = (d) async {
     await Notifs.rescheduleAll(d);

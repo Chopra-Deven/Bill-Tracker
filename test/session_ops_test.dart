@@ -62,4 +62,25 @@ void main() {
     expect(
         deletesFor(['/s/BillTracker/Receipts/X/a.jpg', '/tmp/z.jpg', '/s/BillTracker/Backups/b.zip']), ['Receipts/X/a.jpg']);
   });
+
+  test('wipe keeps going when a step fails', () async {
+    final data = File('${docs.path}/billtracker.json')..writeAsStringSync('{}');
+    put(base, 'Receipts/X/a.jpg');
+    final errors = <Object>[];
+    await wipeLocal(
+        dataFile: data,
+        baseDirs: [base],
+        clearSecure: () async => throw StateError('keystore broken'),
+        onError: errors.add);
+    expect(data.existsSync(), isFalse);
+    expect(Directory('${base.path}/Receipts').existsSync(), isFalse);
+    expect(errors, hasLength(1));
+  });
+
+  test('background work writes only for a signed-in phone with no logout running', () {
+    expect(backgroundMayWrite(dataFileExists: true, signedIn: true, logoutPending: false), isTrue);
+    expect(backgroundMayWrite(dataFileExists: false, signedIn: true, logoutPending: false), isFalse);
+    expect(backgroundMayWrite(dataFileExists: true, signedIn: false, logoutPending: false), isFalse);
+    expect(backgroundMayWrite(dataFileExists: true, signedIn: true, logoutPending: true), isFalse);
+  });
 }

@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:bill_tracker/models.dart';
+import 'package:bill_tracker/sync/remote_store.dart';
 import 'package:bill_tracker/sync/sync_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -17,7 +19,10 @@ void main() {
         local: local,
         remote: () => remote,
         accountId: () async => account,
-        wipe: () async => wipes++,
+        wipe: () async {
+          wipes++;
+          local.wipe();
+        },
         signOut: () async => signOuts++,
         debounce: const Duration(milliseconds: 40),
       );
@@ -114,4 +119,51 @@ void main() {
     expect(remote.calls.where((c) => c == 'uploadData').length, 1);
     expect(wipes, 1);
   });
+
+  test('syncNow downloads receipts the phone does not have', () async {
+    remote.files['Receipts/X/r.jpg'] = [1, 2];
+    final s = svc();
+    await s.syncNow();
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(File('${tmp.path}/Receipts/X/r.jpg').existsSync(), isTrue);
+  });
+
+  test('logout waits for a running pull and the pull writes nothing after it', () async {
+    final gate = Completer<void>();
+    final slow = _SlowRemote(gate.future)
+      ..dataJson = '{"rev":2,"bills":[{"id":"A","nid":1,"name":"A bill","dueDay":5,"startKey":"2026-11","cycles":{}}]}'
+      ..rev = 2;
+    remote = slow;
+    final s = svc();
+    final sync = s.syncNow();
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    final out = s.logout(force: true);
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(wipes, 0, reason: 'wipe must wait for the running pull');
+    gate.complete();
+    await sync;
+    await out;
+    expect(wipes, 1);
+    expect(local.data.bills, isEmpty);
+    expect(local.data.session.accountId, '');
+  });
+
+  test('a conflict can be put off so the app still opens', () async {
+    local.data.session.conflict = true;
+    final s = svc();
+    expect(s.conflictDeferred, isFalse);
+    s.deferConflict();
+    expect(s.conflictDeferred, isTrue);
+  });
+}
+
+/// Remote whose data download waits for [gate].
+class _SlowRemote extends FakeRemote {
+  final Future<void> gate;
+  _SlowRemote(this.gate);
+  @override
+  Future<RemoteData> downloadData() async {
+    await gate;
+    return super.downloadData();
+  }
 }

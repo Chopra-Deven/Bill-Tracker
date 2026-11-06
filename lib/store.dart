@@ -8,6 +8,7 @@ import 'package:permission_handler/permission_handler.dart';
 
 import 'logic.dart';
 import 'models.dart';
+import 'sync/session_ops.dart';
 import 'sync/sync_logic.dart';
 
 /// Holds all app data, saves it to a JSON file, and copies receipts and
@@ -25,8 +26,27 @@ class AppStore extends ChangeNotifier {
   /// Called after a save that marked changes pending (schedules a Drive upload).
   void Function()? onPending;
 
-  /// Raised on every save that marks changes pending.
+  /// Raised on every save that marks changes pending, and on every reload.
   int generation = 0;
+
+  /// Raised by logout; sync work from an older epoch stops writing.
+  int epoch = 0;
+
+  /// Set in background isolates (notification buttons, daily job). Their
+  /// saves are skipped when they could bring back logged-out data.
+  bool background = false;
+
+  /// In a background isolate: true when saving now is safe (see
+  /// [backgroundMayWrite]).
+  Future<bool> backgroundSaveAllowed() async {
+    final f = await _dataFile();
+    final docs = await getApplicationDocumentsDirectory();
+    return backgroundMayWrite(
+      dataFileExists: await f.exists(),
+      signedIn: data.session.signedIn,
+      logoutPending: await logoutMarker(docs).exists(),
+    );
+  }
 
   List<Bill> get bills => data.bills;
   AppSettings get settings => data.settings;
@@ -56,6 +76,9 @@ class AppStore extends ChangeNotifier {
     } catch (e) {
       debugPrint('load failed: $e');
     }
+    // Background isolates may have changed the file: count it as a change,
+    // so a push that started before this reload keeps the changes pending.
+    generation++;
     loaded = true;
     notifyListeners();
   }
@@ -63,6 +86,10 @@ class AppStore extends ChangeNotifier {
   /// Saves to disk. [markPending] (default) records that this change still has
   /// to reach Drive; sync's own saves pass false.
   Future<void> save({bool sideEffects = true, bool markPending = true}) async {
+    if (background && !await backgroundSaveAllowed()) {
+      debugPrint('background save skipped: signed out or logging out');
+      return;
+    }
     if (markPending) {
       data.session.pending = true;
       generation++;
@@ -98,7 +125,8 @@ class AppStore extends ChangeNotifier {
   Future<void> saveLastBackup(int ms) async {
     data.settings.lastBackup = ms;
     final f = await _dataFile();
-    if (!await f.exists()) return save(sideEffects: false, markPending: false);
+    // Never recreate a data file a logout removed while the backup was running.
+    if (!await f.exists()) return;
     await _writeAtomic(f, jsonEncode(patchLastBackup(jsonDecode(await f.readAsString()), ms)));
   }
 
@@ -168,7 +196,10 @@ class AppStore extends ChangeNotifier {
     final ext = _ext(srcName).isEmpty ? '.jpg' : _ext(srcName);
     var target = File('${folder.path}/${key}_$stem$ext');
     var n = 2;
-    while (await target.exists()) {
+    // A name deleted earlier is never reused: other phones would delete it,
+    // and sync would never upload it.
+    bool wasDeleted(File f) => data.deleted.contains(relPath(f.path));
+    while (await target.exists() || wasDeleted(target)) {
       target = File('${folder.path}/${key}_${stem}_$n$ext');
       n++;
     }
@@ -194,6 +225,7 @@ class AppStore extends ChangeNotifier {
     if (b != null && deleteFiles) {
       for (final r in deletesFor(billFilePaths(b))) {
         if (!data.session.pendingDeletes.contains(r)) data.session.pendingDeletes.add(r);
+        if (!data.deleted.contains(r)) data.deleted.add(r);
       }
       for (final path in billFilePaths(b)) {
         try {

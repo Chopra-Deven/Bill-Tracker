@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
+
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
@@ -21,6 +23,12 @@ class AppLocal implements LocalSide {
 
   @override
   int get generation => AppStore.I.generation;
+
+  @override
+  int get epoch => AppStore.I.epoch;
+
+  @override
+  void endSession() => AppStore.I.epoch++;
 
   @override
   Future<void> saveData(AppData d, {required bool markPending}) async {
@@ -62,11 +70,14 @@ Future<void> wipeEverything() async {
     dataFile: await AppStore.dataFile(),
     baseDirs: await AppStore.allBaseDirs(),
     clearSecure: LockService.clearAll,
+    onError: (e) => debugPrint('wipe step failed: $e'),
   );
+  AppStore.I.resetInMemory();
   try {
     await Notifs.plugin.cancelAll();
-  } catch (_) {}
-  AppStore.I.resetInMemory();
+  } catch (e) {
+    debugPrint('cancel reminders failed: $e');
+  }
   await WidgetSync.update(AppStore.I.data);
   final m = logoutMarker(docs);
   if (await m.exists()) await m.delete();

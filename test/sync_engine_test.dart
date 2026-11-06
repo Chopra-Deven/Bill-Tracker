@@ -300,6 +300,157 @@ void main() {
     expect(local.data.bills.single.name, 'X');
     expect(local.saves, 0);
   });
+
+  test('a pull cut short by logout writes nothing to the phone', () async {
+    late FakeLocal local;
+    final r = _Hooks()
+      ..dataJson = driveJson(rev: 2)
+      ..rev = 2
+      ..onDownloadData = () => local.wipe();
+    local = FakeLocal(AppData()
+      ..session.accountId = 'acc'
+      ..session.firstSyncDone = true
+      ..session.baseRev = 1, [base]);
+    await expectLater(SyncEngine(remote: r, local: local).check(), throwsA(isA<SyncCancelled>()));
+    expect(local.data.bills, isEmpty);
+    expect(local.data.session.accountId, '');
+    expect(local.saves, 0);
+  });
+
+  test('a file download cut short by logout writes no file', () async {
+    late FakeLocal local;
+    final r = _Hooks()
+      ..files['Receipts/D/1.jpg'] = [1]
+      ..files['Receipts/D/2.jpg'] = [2]
+      ..onDownloadFile = () => local.wipe();
+    local = FakeLocal(AppData(), [base]);
+    await expectLater(SyncEngine(remote: r, local: local).downloadMissingFiles(), throwsA(isA<SyncCancelled>()));
+    expect(Directory('${base.path}/Receipts').existsSync() ? Directory('${base.path}/Receipts').listSync(recursive: true).whereType<File>() : [], isEmpty);
+  });
+
+  test('a push cut short by logout does not mark the new empty phone as synced', () async {
+    late FakeLocal local;
+    final r = _Hooks()..onUploadData = () => local.wipe();
+    local = FakeLocal(phoneWithReceipt()
+      ..session.firstSyncDone = true
+      ..session.pending = true, [base]);
+    await expectLater(SyncEngine(remote: r, local: local).push(), throwsA(isA<SyncCancelled>()));
+    expect(local.data.session.firstSyncDone, isFalse);
+    expect(local.data.session.baseRev, 0);
+  });
+
+  test('push re-checks the revision after uploading files', () async {
+    final r = _Hooks()
+      ..dataJson = driveJson(rev: 5)
+      ..rev = 5;
+    r.onUploadFile = () => r.rev = 6;
+    final local = FakeLocal(phoneWithReceipt()
+      ..session.firstSyncDone = true
+      ..session.baseRev = 5
+      ..session.pending = true, [base]);
+    await SyncEngine(remote: r, local: local).push();
+    expect(local.data.session.conflict, isTrue);
+    expect(r.calls.contains('uploadData'), isFalse);
+  });
+
+  test('push notices when another phone replaced its write', () async {
+    final r = _Hooks()
+      ..dataJson = driveJson(rev: 5)
+      ..rev = 5;
+    r.afterUploadData = () => r.writer = 'other-phone';
+    final local = FakeLocal(phoneWithReceipt()
+      ..session.firstSyncDone = true
+      ..session.baseRev = 5
+      ..session.pending = true, [base]);
+    await SyncEngine(remote: r, local: local).push();
+    expect(local.data.session.conflict, isTrue);
+    expect(local.data.session.pending, isTrue);
+  });
+
+  test('files deleted on another phone are removed here and not uploaded again', () async {
+    final f = put(base, 'Receipts/X/a.jpg', 'img');
+    remote
+      ..dataJson = jsonEncode({
+        'rev': 2,
+        'bills': [],
+        'deleted': ['Receipts/X/a.jpg']
+      })
+      ..rev = 2;
+    final local = FakeLocal(AppData()
+      ..session.accountId = 'acc'
+      ..session.firstSyncDone = true
+      ..session.baseRev = 1, [base]);
+    final e = SyncEngine(remote: remote, local: local);
+    expect(await e.check(), ResumeAction.pull);
+    expect(f.existsSync(), isFalse);
+    put(base, 'Receipts/X/a.jpg', 'img');
+    local.userChange();
+    await e.push();
+    expect(remote.files.containsKey('Receipts/X/a.jpg'), isFalse);
+  });
+
+  test('use Drive on conflict clears pending deletes', () async {
+    remote
+      ..dataJson = driveJson(rev: 6)
+      ..rev = 6;
+    final d = phoneWithReceipt()
+      ..session.conflict = true
+      ..session.pendingDeletes.add('Receipts/D/r.jpg');
+    final local = FakeLocal(d, [base]);
+    await SyncEngine(remote: remote, local: local).resolveConflict(keepPhone: false);
+    expect(local.data.session.pendingDeletes, isEmpty);
+  });
+
+  test('leftover .part files are removed and never uploaded', () async {
+    put(base, 'Receipts/D/r.jpg.part');
+    final local = FakeLocal(phoneWithReceipt(), [base]);
+    final e = SyncEngine(remote: remote, local: local);
+    await e.downloadMissingFiles();
+    expect(File('${base.path}/Receipts/D/r.jpg.part').existsSync(), isFalse);
+    await e.firstSync();
+    expect(remote.files.keys.any((k) => k.endsWith('.part')), isFalse);
+  });
+
+  test('first sync download marks the phone ready in the same save', () async {
+    remote
+      ..dataJson = driveJson()
+      ..rev = 3;
+    final local = FakeLocal(AppData()..session.accountId = 'acc', [base]);
+    await SyncEngine(remote: remote, local: local).firstSync();
+    expect(local.saves, 1);
+    expect(local.data.session.firstSyncDone, isTrue);
+  });
+}
+
+/// Remote with hooks that run in the middle of calls.
+class _Hooks extends FakeRemote {
+  void Function()? onDownloadData, onDownloadFile, onUploadData, afterUploadData, onUploadFile;
+  @override
+  Future<RemoteData> downloadData() async {
+    final d = await super.downloadData();
+    onDownloadData?.call();
+    return d;
+  }
+
+  @override
+  Future<List<int>> downloadFile(String rel) async {
+    final b = await super.downloadFile(rel);
+    onDownloadFile?.call();
+    return b;
+  }
+
+  @override
+  Future<void> uploadData(String json, int r, {String writer = ''}) async {
+    onUploadData?.call();
+    await super.uploadData(json, r, writer: writer);
+    afterUploadData?.call();
+  }
+
+  @override
+  Future<void> uploadFile(String rel, List<int> bytes) async {
+    await super.uploadFile(rel, bytes);
+    onUploadFile?.call();
+  }
 }
 
 /// Remote that runs [onUpload] while the data upload is in flight.
@@ -307,8 +458,8 @@ class _HookRemote extends FakeRemote {
   final void Function() onUpload;
   _HookRemote(this.onUpload);
   @override
-  Future<void> uploadData(String json, int r) async {
+  Future<void> uploadData(String json, int r, {String writer = ''}) async {
     onUpload();
-    await super.uploadData(json, r);
+    await super.uploadData(json, r, writer: writer);
   }
 }

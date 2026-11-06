@@ -95,4 +95,11 @@ void main() {
     final named = AppData()..profile.name = 'From backup';
     expect(keepPhoneState(named, cur).profile.name, 'From backup');
   });
+
+  test('deleted file list is synced in cloud json', () {
+    final d = AppData()..deleted.add('Receipts/X/a.jpg');
+    final j = d.toCloudJson((p) => p);
+    expect(j['deleted'], ['Receipts/X/a.jpg']);
+    expect(AppData.fromCloudJson(j, (r) => r, AppSettings(), SyncSession()).deleted, ['Receipts/X/a.jpg']);
+  });
 }

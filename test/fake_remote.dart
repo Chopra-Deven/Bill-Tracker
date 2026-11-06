@@ -8,6 +8,7 @@ import 'package:bill_tracker/sync/sync_engine.dart';
 class FakeRemote implements RemoteStore {
   String? dataJson;
   int? rev;
+  String? writer;
   final files = <String, List<int>>{};
   final previous = <String, String>{};
   final calls = <String>[];
@@ -32,10 +33,17 @@ class FakeRemote implements RemoteStore {
   }
 
   @override
-  Future<void> uploadData(String json, int r) async {
+  Future<void> uploadData(String json, int r, {String writer = ''}) async {
     _net('uploadData');
     dataJson = json;
     rev = r;
+    this.writer = writer;
+  }
+
+  @override
+  Future<String?> dataWriter() async {
+    _net('dataWriter');
+    return dataJson == null ? null : writer;
   }
 
   @override
@@ -78,6 +86,17 @@ class FakeLocal implements LocalSide {
   final List<Directory> dirs;
   int saves = 0;
   int _gen = 0;
+  @override
+  int epoch = 0;
+
+  @override
+  void endSession() => epoch++;
+
+  /// What logout does to the phone: a new epoch and empty data.
+  void wipe() {
+    epoch++;
+    data = AppData();
+  }
 
   FakeLocal(this.data, this.dirs);
 

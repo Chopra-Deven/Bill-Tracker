@@ -2,10 +2,17 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
 import 'remote_store.dart';
+
+/// Files above this size go up in a resumable upload instead of multipart.
+const resumableAbove = 5 * 1024 * 1024;
+
+/// Time allowed for sending [bytes]: 30 s plus about 32 KB/s of slow mobile data.
+Duration uploadTimeout(int bytes) => Duration(seconds: 30 + bytes ~/ (32 * 1024));
 
 /// [RemoteStore] on the Drive v3 REST API, inside the hidden appDataFolder.
 /// Every file is found by its exact name; uploads update an existing file of
@@ -24,12 +31,13 @@ class DriveRest implements RemoteStore {
 
   // ---------- transport ----------
 
-  Future<http.Response> _send(http.BaseRequest Function(String token) build, {bool retried = false}) async {
+  Future<http.Response> _send(http.BaseRequest Function(String token) build,
+      {bool retried = false, Duration wait = timeout}) async {
     final t = await token();
     if (t == null || t.isEmpty) throw RemoteError('auth', 'Sign in again to keep syncing.');
     http.Response res;
     try {
-      res = await http.Response.fromStream(await client.send(build(t)).timeout(timeout)).timeout(timeout);
+      res = await http.Response.fromStream(await client.send(build(t)).timeout(wait)).timeout(wait);
     } on SocketException catch (e) {
       throw RemoteError('offline', e.message);
     } on TimeoutException {
@@ -40,7 +48,7 @@ class DriveRest implements RemoteStore {
     if (res.statusCode == 401) {
       if (!retried && onUnauthorized != null) {
         await onUnauthorized!(t);
-        return _send(build, retried: true);
+        return _send(build, retried: true, wait: wait);
       }
       throw RemoteError('auth', 'Sign in again to keep syncing.');
     }
@@ -93,22 +101,45 @@ class DriveRest implements RemoteStore {
   }
 
   Future<void> _put(String name, List<int> bytes, Map<String, String> props, {String? id}) async {
-    final boundary = 'bt${Random.secure().nextInt(1 << 32)}${DateTime.now().microsecondsSinceEpoch}';
     final meta = <String, dynamic>{
       'appProperties': props,
       if (id == null) ...{'name': name, 'parents': ['appDataFolder']},
     };
-    final body = <int>[
-      ...utf8.encode('--$boundary\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${jsonEncode(meta)}\r\n'),
-      ...utf8.encode('--$boundary\r\nContent-Type: application/octet-stream\r\n\r\n'),
-      ...bytes,
-      ...utf8.encode('\r\n--$boundary--\r\n'),
-    ];
+    if (bytes.length > resumableAbove) return _putResumable(meta, bytes, id: id);
+    final boundary = 'bt${Random.secure().nextInt(1 << 32)}${DateTime.now().microsecondsSinceEpoch}';
+    final body = BytesBuilder(copy: false)
+      ..add(utf8.encode('--$boundary\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${jsonEncode(meta)}\r\n'))
+      ..add(utf8.encode('--$boundary\r\nContent-Type: application/octet-stream\r\n\r\n'))
+      ..add(bytes)
+      ..add(utf8.encode('\r\n--$boundary--\r\n'));
+    final bodyBytes = body.takeBytes();
     final url = id == null ? '$_upload?uploadType=multipart' : '$_upload/$id?uploadType=multipart';
-    await _send((t) => http.Request(id == null ? 'POST' : 'PATCH', Uri.parse(url))
+    await _send(
+        (t) => http.Request(id == null ? 'POST' : 'PATCH', Uri.parse(url))
+          ..headers['Authorization'] = 'Bearer $t'
+          ..headers['Content-Type'] = 'multipart/related; boundary=$boundary'
+          ..bodyBytes = bodyBytes,
+        wait: uploadTimeout(bodyBytes.length));
+  }
+
+  /// Two steps: start a session with the metadata, then send the bytes.
+  Future<void> _putResumable(Map<String, dynamic> meta, List<int> bytes, {String? id}) async {
+    final url = id == null ? '$_upload?uploadType=resumable' : '$_upload/$id?uploadType=resumable';
+    final start = await _send((t) => http.Request(id == null ? 'POST' : 'PATCH', Uri.parse(url))
       ..headers['Authorization'] = 'Bearer $t'
-      ..headers['Content-Type'] = 'multipart/related; boundary=$boundary'
-      ..bodyBytes = body);
+      ..headers['Content-Type'] = 'application/json; charset=UTF-8'
+      ..headers['X-Upload-Content-Type'] = 'application/octet-stream'
+      ..headers['X-Upload-Content-Length'] = '${bytes.length}'
+      ..body = jsonEncode(meta));
+    final session = start.headers['location'];
+    if (session == null) throw RemoteError('server', 'Google Drive did not start the upload.');
+    final data = bytes is Uint8List ? bytes : Uint8List.fromList(bytes);
+    await _send(
+        (t) => http.Request('PUT', Uri.parse(session))
+          ..headers['Authorization'] = 'Bearer $t'
+          ..headers['Content-Type'] = 'application/octet-stream'
+          ..bodyBytes = data,
+        wait: uploadTimeout(data.length));
   }
 
   Future<List<int>> _download(String id) async =>
@@ -135,9 +166,16 @@ class DriveRest implements RemoteStore {
   }
 
   @override
-  Future<void> uploadData(String json, int rev) async {
+  Future<void> uploadData(String json, int rev, {String writer = ''}) async {
     final f = await _find(dataName);
-    await _put(dataName, utf8.encode(json), {'type': 'data', 'rev': '$rev'}, id: f?['id'] as String?);
+    await _put(dataName, utf8.encode(json), {'type': 'data', 'rev': '$rev', 'writer': writer}, id: f?['id'] as String?);
+  }
+
+  @override
+  Future<String?> dataWriter() async {
+    final f = await _find(dataName);
+    if (f == null) return null;
+    return '${(f['appProperties'] as Map?)?['writer'] ?? ''}';
   }
 
   @override

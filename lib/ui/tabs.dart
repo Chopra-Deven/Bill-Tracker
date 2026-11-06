@@ -4,6 +4,7 @@ import '../logic.dart';
 import '../models.dart';
 import '../notifications.dart';
 import '../store.dart';
+import '../sync/sync_service.dart';
 import 'auth_pages.dart';
 import 'common.dart';
 import 'files.dart';
@@ -98,6 +99,19 @@ class HomeTab extends StatelessWidget {
               StatTile('${paid.length}/${bills.length}', 'Paid in ${monthName(tk)}', color: p.ok),
             ]),
             const SizedBox(height: 10),
+            if (st.data.session.conflict)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Card(
+                  color: p.warnSoft,
+                  child: ListTile(
+                    leading: Icon(Icons.sync_problem, color: p.warn),
+                    title: const Text('Not syncing', style: TextStyle(fontWeight: FontWeight.w600)),
+                    subtitle: const Text('This phone and Google Drive both changed. Nothing is saved to Drive until you choose.'),
+                    trailing: TextButton(onPressed: SyncService.I.chooseNow, child: const Text('Choose')),
+                  ),
+                ),
+              ),
             Card(
               child: ListTile(
                 leading: Icon(Icons.share_outlined, color: Theme.of(context).colorScheme.primary),

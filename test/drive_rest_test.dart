@@ -14,6 +14,7 @@ http.Response js(Object body, [int code = 200]) =>
 class FakeDriveServer {
   final files = <String, Map<String, dynamic>>{}; // id -> {name, appProperties, body}
   final log = <String>[];
+  final sessions = <String, Map<String, dynamic>>{};
   int next = 1;
   int pageSize = 1000;
 
@@ -48,6 +49,24 @@ class FakeDriveServer {
       return files.remove(media.group(1)) == null ? js({}, 404) : http.Response('', 204);
     }
     final up = RegExp(r'^/upload/drive/v3/files(?:/(\w+))?$').firstMatch(u.path);
+    if (up != null && u.queryParameters['uploadType'] == 'resumable') {
+      final sid = u.queryParameters['upload_id'];
+      if (sid == null) {
+        final key = 's${next++}';
+        sessions[key] = {'id': up.group(1), 'meta': jsonDecode(r.body)};
+        return http.Response('', 200, headers: {'location': 'https://www.googleapis.com${u.path}?uploadType=resumable&upload_id=$key'});
+      }
+      final sess = sessions.remove(sid)!;
+      final meta = sess['meta'] as Map<String, dynamic>;
+      final id = sess['id'] as String? ?? '${next++}';
+      final old = files[id] ?? {};
+      files[id] = {
+        'name': meta['name'] ?? old['name'],
+        'appProperties': {...?old['appProperties'] as Map?, ...?meta['appProperties'] as Map?},
+        'body': r.bodyBytes,
+      };
+      return js({'id': id});
+    }
     if (up != null) {
       final parts = _parts(r);
       final meta = jsonDecode(parts[0]) as Map<String, dynamic>;
@@ -59,6 +78,10 @@ class FakeDriveServer {
         'body': utf8.encode(parts[1]),
       };
       return js({'id': id});
+    }
+    if (r.method == 'GET' && u.path.startsWith('/drive/v3/files/') && u.queryParameters['fields'] != null) {
+      final f = files[u.pathSegments.last];
+      return f == null ? js({}, 404) : js({'id': u.pathSegments.last, 'appProperties': f['appProperties']});
     }
     return js({}, 400);
   }
@@ -168,5 +191,27 @@ void main() {
     await d.deleteFile('Receipts/X/a.jpg');
     await d.deleteFile('Receipts/X/a.jpg');
     expect(srv.files, isEmpty);
+  });
+
+  test('uploadData stores the writer id and dataWriter reads it back', () async {
+    final d = drive();
+    expect(await d.dataWriter(), isNull);
+    await d.uploadData('{}', 1, writer: 'w1');
+    expect(await d.dataWriter(), 'w1');
+  });
+
+  test('files over 5 MB use a resumable upload', () async {
+    final d = drive();
+    final big = List<int>.filled(6 * 1024 * 1024, 7);
+    await d.uploadFile('Statements/X/big.pdf', big);
+    expect(srv.log.where((l) => l.startsWith('PUT')).length, 1);
+    expect((await d.downloadFile('Statements/X/big.pdf')).length, big.length);
+    await d.uploadFile('Statements/X/big.pdf', big);
+    expect(srv.files.length, 1);
+  });
+
+  test('upload timeout grows with the file size', () {
+    expect(uploadTimeout(1000), const Duration(seconds: 30));
+    expect(uploadTimeout(10 * 1024 * 1024).inSeconds, greaterThan(200));
   });
 }

@@ -24,7 +24,7 @@ void backgroundDispatcher() {
 /// three keep working when the app is not opened for a long time.
 /// Never throws: each step logs its own error.
 Future<void> runDailyMaintenance() async {
-  final st = AppStore.I;
+  final st = AppStore.I..background = true;
   Future<void> step(String name, Future<void> Function() f) async {
     try {
       await f();
@@ -34,6 +34,7 @@ Future<void> runDailyMaintenance() async {
   }
 
   await step('load', st.load);
+  if (!await st.backgroundSaveAllowed()) return; // signed out or logging out
   await step('notifs init', Notifs.init);
   await step('reschedule', () => Notifs.rescheduleAll(st.data));
   await step('widgets', () => WidgetSync.update(st.data));

@@ -16,6 +16,13 @@ abstract class LocalSide {
   /// tell whether something changed while it was uploading.
   int get generation;
 
+  /// Raised by logout. An operation that started in an older epoch stops
+  /// before writing anything to the phone.
+  int get epoch;
+
+  /// Starts a new epoch (logout), so running operations stop writing.
+  void endSession();
+
   Future<void> saveData(AppData d, {required bool markPending});
 
   /// Every BillTracker folder that may hold files, current one first.
@@ -23,7 +30,14 @@ abstract class LocalSide {
   Future<Directory> currentBase();
 }
 
-/// Moves data and files between the phone and Drive. One operation at a time.
+/// Thrown when logout happened while a sync operation was running.
+class SyncCancelled implements Exception {
+  @override
+  String toString() => 'Sync stopped because you logged out.';
+}
+
+/// Moves data and files between the phone and Drive. Operations run one at a
+/// time, and each one stops before any phone write once logout has started.
 class SyncEngine {
   final RemoteStore remote;
   final LocalSide local;
@@ -31,10 +45,22 @@ class SyncEngine {
 
   Future<void> _tail = Future.value();
 
-  Future<T> _one<T>(Future<T> Function() f) {
-    final run = _tail.then((_) => f());
+  Future<T> _one<T>(Future<T> Function(int epoch) f) {
+    final run = _tail.then((_) => f(local.epoch));
     _tail = run.then((_) {}, onError: (_) {});
     return run;
+  }
+
+  /// Completes when every queued operation has finished.
+  Future<void> drain() => _tail;
+
+  void _alive(int epoch) {
+    if (local.epoch != epoch) throw SyncCancelled();
+  }
+
+  Future<void> _save(int epoch, AppData d) async {
+    _alive(epoch);
+    await local.saveData(d, markPending: false);
   }
 
   static String toRel(String abs) => relPath(abs) ?? 'Files/${abs.split('/').last}';
@@ -45,10 +71,15 @@ class SyncEngine {
     return jsonEncode(j);
   }
 
-  String _stamp() {
+  static String _stamp() {
     final n = DateTime.now();
     String p(int v) => v.toString().padLeft(2, '0');
     return '${n.year}${p(n.month)}${p(n.day)}-${p(n.hour)}${p(n.minute)}${p(n.second)}';
+  }
+
+  static String _writerId() {
+    final r = math.Random.secure();
+    return List.generate(12, (_) => r.nextInt(36).toRadixString(36)).join();
   }
 
   /// Receipt and statement files on the phone, relative path → file.
@@ -60,10 +91,9 @@ class SyncEngine {
         final d = Directory('${dir.path}/$sub');
         if (!await d.exists()) continue;
         await for (final e in d.list(recursive: true, followLinks: false)) {
-          if (e is! File) continue;
+          if (e is! File || e.path.endsWith('.part')) continue;
           final rel = e.path.substring(dir.path.length + 1);
-          if (e.path.endsWith('.part') || !isSyncedFolder(rel)) continue;
-          out.putIfAbsent(rel, () => e);
+          if (isSyncedFolder(rel)) out.putIfAbsent(rel, () => e);
         }
       }
     }
@@ -72,26 +102,46 @@ class SyncEngine {
 
   Future<Set<String>> localFiles() async => (await _localFileMap()).keys.toSet();
 
-  Future<void> _uploadFiles() async {
+  Future<void> _uploadFiles(int epoch) async {
     final remoteSet = await remote.listFiles();
     final map = await _localFileMap();
-    for (final rel in filesToUpload(map.keys.toSet(), remoteSet)) {
+    final skip = local.data.deleted.toSet();
+    for (final rel in filesToUpload(map.keys.toSet(), remoteSet).difference(skip)) {
+      _alive(epoch);
       await remote.uploadFile(rel, await map[rel]!.readAsBytes());
     }
   }
 
-  Future<List<String>> _applyDeletes(AppData d) async {
+  Future<List<String>> _applyDeletes(int epoch) async {
     final done = <String>[];
-    for (final rel in List<String>.from(d.session.pendingDeletes)) {
+    for (final rel in List<String>.from(local.data.session.pendingDeletes)) {
+      _alive(epoch);
       await remote.deleteFile(rel);
       done.add(rel);
     }
     return done;
   }
 
-  /// Writes [rev] as the new matched revision. Changes saved while the upload
-  /// ran (generation moved) stay pending.
-  Future<void> _afterUpload(int rev, int gen, {List<String> deleted = const []}) async {
+  /// Uploads the data file at [rev], then checks that no other phone wrote
+  /// over it. Returns false (and flags a conflict) when one did.
+  Future<bool> _writeData(int epoch, int rev) async {
+    final writer = _writerId();
+    _alive(epoch);
+    await remote.uploadData(_cloudJson(local.data, rev), rev, writer: writer);
+    final now = await remote.dataWriter();
+    if (now != writer) {
+      final d = local.data;
+      d.session.conflict = true;
+      await _save(epoch, d);
+      return false;
+    }
+    return true;
+  }
+
+  /// Records [rev] as matched. Changes saved while the upload ran
+  /// (generation moved) stay pending.
+  Future<void> _afterUpload(int epoch, int rev, int gen, {List<String> deleted = const []}) async {
+    _alive(epoch);
     final d = local.data;
     d.rev = rev;
     d.session
@@ -101,7 +151,7 @@ class SyncEngine {
       ..firstSyncDone = true
       ..lastSyncAt = DateTime.now().millisecondsSinceEpoch
       ..pendingDeletes.removeWhere(deleted.contains);
-    await local.saveData(d, markPending: false);
+    await _save(epoch, d);
   }
 
   Future<AppData> _remoteData() async {
@@ -121,38 +171,53 @@ class SyncEngine {
   }
 
   /// Drive's data, for showing a summary. Changes nothing.
-  Future<AppData> peekRemote() => _one(_remoteData);
+  Future<AppData> peekRemote() => _one((_) => _remoteData());
 
-  Future<void> _pull() async {
+  /// Replaces the phone's data with Drive's. Files Drive lists as deleted are
+  /// removed from the phone. [ready] also marks the first sync done.
+  Future<void> _pull(int epoch, {bool ready = false}) async {
     final d = await _remoteData();
+    _alive(epoch);
     d.session = SyncSession.fromJson(d.session.toJson())
       ..baseRev = d.rev
       ..pending = false
       ..conflict = false
+      ..pendingDeletes.clear()
       ..lastSyncAt = DateTime.now().millisecondsSinceEpoch;
-    await local.saveData(d, markPending: false);
+    if (ready) d.session.firstSyncDone = true;
+    for (final dir in await local.baseDirs()) {
+      for (final rel in d.deleted) {
+        final path = safeJoin(dir.path, rel);
+        if (path == null) continue;
+        final f = File(path);
+        if (await f.exists()) await f.delete();
+      }
+    }
+    await _save(epoch, d);
   }
 
   /// First sync after sign-in (spec §7.4). On `choose` nothing changes except
   /// the conflict flag. Errors leave the phone as it was.
-  Future<FirstSyncAction> firstSync() => _one(() async {
+  Future<FirstSyncAction> firstSync() => _one((epoch) async {
         final rr = await remote.dataRev();
         final action = firstSyncAction(localHasBills: local.data.bills.isNotEmpty, remoteExists: rr != null);
         switch (action) {
           case FirstSyncAction.create:
           case FirstSyncAction.upload:
             final gen = local.generation;
-            await _uploadFiles();
-            const rev = 1;
-            await remote.uploadData(_cloudJson(local.data, rev), rev);
-            await _afterUpload(rev, gen);
+            await _uploadFiles(epoch);
+            if (await remote.dataRev() != null) {
+              // Another phone created the data meanwhile: let the user choose.
+              local.data.session.conflict = true;
+              await _save(epoch, local.data);
+              return FirstSyncAction.choose;
+            }
+            if (await _writeData(epoch, 1)) await _afterUpload(epoch, 1, gen);
           case FirstSyncAction.download:
-            await _pull();
-            local.data.session.firstSyncDone = true;
-            await local.saveData(local.data, markPending: false);
+            await _pull(epoch, ready: true);
           case FirstSyncAction.choose:
             local.data.session.conflict = true;
-            await local.saveData(local.data, markPending: false);
+            await _save(epoch, local.data);
         }
         return action;
       });
@@ -161,46 +226,52 @@ class SyncEngine {
   /// pulls instead (no local changes) or flags a conflict, and uploads nothing.
   Future<void> push() => _one(_push);
 
-  Future<void> _push() async {
+  /// Handles a Drive revision that is not the one this phone matched.
+  /// Returns true when it did something instead of a push.
+  Future<bool> _remoteMoved(int epoch, int? rr) async {
     final d = local.data;
-    final rr = await remote.dataRev();
-    if (rr != null && rr != d.session.baseRev) {
-      final a = resumeAction(baseRev: d.session.baseRev, remoteRev: rr, pending: d.session.pending);
-      if (a == ResumeAction.pull) {
-        await _pull();
-      } else {
-        d.session.conflict = true;
-        await local.saveData(d, markPending: false);
-      }
-      return;
+    if (rr == null || rr == d.session.baseRev) return false;
+    final a = resumeAction(baseRev: d.session.baseRev, remoteRev: rr, pending: d.session.pending);
+    if (a == ResumeAction.pull) {
+      await _pull(epoch);
+    } else {
+      d.session.conflict = true;
+      await _save(epoch, d);
     }
+    return true;
+  }
+
+  Future<void> _push(int epoch) async {
+    if (await _remoteMoved(epoch, await remote.dataRev())) return;
     final gen = local.generation;
-    await _uploadFiles();
-    final deleted = await _applyDeletes(d);
-    final rev = math.max(rr ?? 0, d.session.baseRev) + 1;
-    await remote.uploadData(_cloudJson(local.data, rev), rev);
-    await _afterUpload(rev, gen, deleted: deleted);
+    await _uploadFiles(epoch);
+    final deleted = await _applyDeletes(epoch);
+    // Files can take long to upload: check again right before the data file.
+    final rr = await remote.dataRev();
+    if (await _remoteMoved(epoch, rr)) return;
+    final rev = math.max(rr ?? 0, local.data.session.baseRev) + 1;
+    if (await _writeData(epoch, rev)) await _afterUpload(epoch, rev, gen, deleted: deleted);
   }
 
   /// Start/resume check (spec §8.3). Returns what was done.
-  Future<ResumeAction> check() => _one(() async {
+  Future<ResumeAction> check() => _one((epoch) async {
         final d = local.data;
         final rr = await remote.dataRev();
         if (rr == null) {
           // Drive data is gone (for example deleted from Drive settings):
           // this phone holds the only copy, so upload it.
-          await _push();
+          await _push(epoch);
           return ResumeAction.push;
         }
         final a = resumeAction(baseRev: d.session.baseRev, remoteRev: rr, pending: d.session.pending);
         switch (a) {
           case ResumeAction.push:
-            await _push();
+            await _push(epoch);
           case ResumeAction.pull:
-            await _pull();
+            await _pull(epoch);
           case ResumeAction.conflict:
             d.session.conflict = true;
-            await local.saveData(d, markPending: false);
+            await _save(epoch, d);
           case ResumeAction.nothing:
             break;
         }
@@ -209,38 +280,51 @@ class SyncEngine {
 
   /// Settles a conflict (spec §8.4). The losing data file is kept in Drive
   /// under previous/, and no Drive file is deleted.
-  Future<void> resolveConflict({required bool keepPhone}) => _one(() async {
+  Future<void> resolveConflict({required bool keepPhone}) => _one((epoch) async {
         final name = 'previous/data-${_stamp()}.json';
-        await _uploadFiles();
+        await _uploadFiles(epoch);
         if (keepPhone) {
           final rr = await remote.dataRev();
           if (rr != null) await remote.savePrevious((await remote.downloadData()).json, name);
           final gen = local.generation;
           final rev = math.max(rr ?? 0, local.data.session.baseRev) + 1;
-          await remote.uploadData(_cloudJson(local.data, rev), rev);
-          await _afterUpload(rev, gen);
+          if (await _writeData(epoch, rev)) await _afterUpload(epoch, rev, gen);
         } else {
           await remote.savePrevious(_cloudJson(local.data, local.data.rev), name);
-          await _pull();
-          local.data.session.firstSyncDone = true;
-          await local.saveData(local.data, markPending: false);
+          await _pull(epoch, ready: true);
         }
       });
 
   /// Downloads Drive files the phone does not have yet into the current
-  /// folder. Unsafe names are skipped. Returns the number written.
-  Future<int> downloadMissingFiles({void Function(int done, int total)? progress}) => _one(() async {
+  /// folder, after removing leftovers of interrupted downloads. Unsafe names
+  /// and deleted files are skipped. Returns the number written.
+  Future<int> downloadMissingFiles({void Function(int done, int total)? progress}) => _one((epoch) async {
+        for (final dir in await local.baseDirs()) {
+          for (final sub in ['Receipts', 'Statements']) {
+            final d = Directory('${dir.path}/$sub');
+            if (!await d.exists()) continue;
+            await for (final e in d.list(recursive: true, followLinks: false)) {
+              if (e is File && e.path.endsWith('.part')) await e.delete();
+            }
+          }
+        }
         final base = await local.currentBase();
-        final missing = filesToDownload(await localFiles(), await remote.listFiles()).where(isSyncedFolder).toList()
+        final skip = local.data.deleted.toSet();
+        final missing = filesToDownload(await localFiles(), await remote.listFiles())
+            .where((r) => isSyncedFolder(r) && !skip.contains(r))
+            .toList()
           ..sort();
         var done = 0;
         for (final rel in missing) {
           final target = safeJoin(base.path, rel);
           if (target == null) continue;
+          _alive(epoch);
           final bytes = await remote.downloadFile(rel);
+          _alive(epoch);
           final part = File('$target.part');
           await part.parent.create(recursive: true);
           await part.writeAsBytes(bytes, flush: true);
+          _alive(epoch);
           await part.rename(target);
           done++;
           progress?.call(done, missing.length);

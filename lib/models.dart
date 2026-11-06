@@ -281,8 +281,20 @@ class AppData {
   SyncSession session;
   int rev; // revision of the data, raised on every upload to Drive
 
-  AppData({List<Bill>? bills, AppSettings? settings, this.nextNid = 1, Profile? profile, SyncSession? session, this.rev = 0})
+  /// Relative paths of receipts and statements the user deleted. Synced, so
+  /// other phones delete them too and never upload them again.
+  List<String> deleted;
+
+  AppData(
+      {List<Bill>? bills,
+      AppSettings? settings,
+      this.nextNid = 1,
+      Profile? profile,
+      SyncSession? session,
+      this.rev = 0,
+      List<String>? deleted})
       : bills = bills ?? [],
+        deleted = deleted ?? [],
         settings = settings ?? AppSettings(),
         profile = profile ?? Profile(),
         session = session ?? SyncSession();
@@ -292,6 +304,7 @@ class AppData {
         'version': 1,
         'nextNid': nextNid,
         'rev': rev,
+        'deleted': deleted,
         'settings': settings.toJson(),
         'profile': profile.toJson(),
         'session': session.toJson(),
@@ -354,6 +367,7 @@ class AppData {
       profile: Profile.fromJson(j['profile'] as Map?),
       session: SyncSession.fromJson(j['session'] as Map?),
       rev: (j['rev'] as num?)?.toInt() ?? 0,
+      deleted: ((j['deleted'] as List?) ?? []).map((e) => '$e').toList(),
     );
   }
 }

@@ -15,6 +15,7 @@ import 'widget_sync.dart';
 void notifBackground(NotificationResponse r) async {
   WidgetsFlutterBinding.ensureInitialized();
   DartPluginRegistrant.ensureInitialized();
+  AppStore.I.background = true;
   await Notifs.init();
   AppStore.I.onChanged = (d) async {
     await Notifs.rescheduleAll(d);
@@ -172,6 +173,7 @@ class Notifs {
     final billId = p[0], key = p[1];
     final st = AppStore.I;
     await st.load();
+    if (st.background && !await st.backgroundSaveAllowed()) return; // signed out or logging out
     final b = st.find(billId);
     if (b == null) return;
     switch (r.actionId) {

@@ -21,8 +21,12 @@ abstract class RemoteStore {
   Future<int?> dataRev();
   Future<RemoteData> downloadData();
 
-  /// Creates or replaces the data file.
-  Future<void> uploadData(String json, int rev);
+  /// Creates or replaces the data file. [writer] is a random id of this write,
+  /// read back with [dataWriter] to detect another phone writing at the same time.
+  Future<void> uploadData(String json, int rev, {String writer = ''});
+
+  /// The writer id of the current data file, or null when there is none.
+  Future<String?> dataWriter();
 
   /// Keeps a copy of a data file that lost a conflict.
   Future<void> savePrevious(String json, String name);

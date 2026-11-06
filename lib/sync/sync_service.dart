@@ -53,7 +53,28 @@ class SyncService extends ChangeNotifier {
   int _backoff = 0;
   bool _busy = false, _again = false, _disposed = false;
 
-  SyncEngine get _engine => SyncEngine(remote: remote(), local: local);
+  /// One engine, so every operation (sync, first sync, downloads, logout's
+  /// upload) runs in one queue that logout can wait for.
+  late final SyncEngine engine = SyncEngine(remote: remote(), local: local);
+  SyncEngine get _engine => engine;
+
+  bool _deferred = false;
+
+  /// True after the user chose "Decide later" on the conflict screen.
+  bool get conflictDeferred => _deferred;
+
+  /// Lets the app open while a conflict waits; nothing is uploaded until the
+  /// user chooses.
+  void deferConflict() {
+    _deferred = true;
+    if (!_disposed) notifyListeners();
+  }
+
+  /// Shows the conflict choice again.
+  void chooseNow() {
+    _deferred = false;
+    if (!_disposed) notifyListeners();
+  }
 
   void _set(SyncStatus s, [String? msg]) {
     status = s;
@@ -88,7 +109,11 @@ class SyncService extends ChangeNotifier {
       if (!await _accountOk()) return;
       await _engine.check();
       _backoff = 0;
-      _set(local.data.session.conflict ? SyncStatus.conflict : SyncStatus.idle);
+      final conflict = local.data.session.conflict;
+      _set(conflict ? SyncStatus.conflict : SyncStatus.idle);
+      if (!conflict) unawaited(downloadFiles());
+    } on SyncCancelled {
+      _set(SyncStatus.idle);
     } on RemoteError catch (e) {
       _onError(e);
     } catch (e) {
@@ -174,6 +199,7 @@ class SyncService extends ChangeNotifier {
   Future<void> resolve({required bool keepPhone}) async {
     if (!await _accountOk()) throw RemoteError('auth', message ?? 'Sign in again.');
     await _engine.resolveConflict(keepPhone: keepPhone);
+    _deferred = false;
     _set(SyncStatus.idle);
     unawaited(downloadFiles());
   }
@@ -188,6 +214,8 @@ class SyncService extends ChangeNotifier {
         filesTotal = t;
         if (!_disposed) notifyListeners();
       });
+    } on SyncCancelled {
+      // Logged out meanwhile.
     } on RemoteError catch (e) {
       _onError(e);
     } catch (e) {
@@ -216,9 +244,14 @@ class SyncService extends ChangeNotifier {
         throw LogoutBlocked(e.message);
       }
     }
+    // Stop running work from writing to the phone, and wait until it has
+    // ended, before signing out and wiping.
+    local.endSession();
+    await _engine.drain();
     await signOut();
     await wipe();
     _backoff = 0;
+    _deferred = false;
     _set(SyncStatus.idle);
   }
 
