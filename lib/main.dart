@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:receive_sharing_intent/receive_sharing_intent.dart';
 
+import 'background.dart';
 import 'backup.dart';
 import 'logic.dart';
 import 'notifications.dart';
@@ -22,6 +23,7 @@ Future<void> main() async {
     await WidgetSync.update(d);
   };
   await Notifs.init();
+  await registerDailyJob();
   runApp(const BillTrackerApp());
 }
 

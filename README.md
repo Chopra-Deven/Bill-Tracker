@@ -47,7 +47,7 @@ The file is `build/app/outputs/flutter-apk/app-release.apk`. Install with `adb i
 
 - Notifications, and "Alarms & reminders" if asked (for on-time reminders).
 - Settings > Storage > "Allow all files access" in the app, so files go to the BillTracker folder in main storage.
-- Battery: set Bill Tracker to "Unrestricted" so reminders are not delayed.
+- Battery: set Bill Tracker to "Unrestricted" so reminders are not delayed. A daily background job re-plans reminders, refreshes the widgets and runs the auto-backup even when the app is not opened; battery restrictions can stop it.
 
 ## Project layout
 

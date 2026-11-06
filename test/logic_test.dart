@@ -111,6 +111,14 @@ void main() {
     expect(ids.every((i) => i < 2147483647), isTrue);
   });
 
+  test('keepNewerBackup takes lastBackup written by the background job', () {
+    final mem = AppData()..settings.lastBackup = 100;
+    keepNewerBackup(mem, (AppData()..settings.lastBackup = 500).toJson());
+    expect(mem.settings.lastBackup, 500);
+    keepNewerBackup(mem, (AppData()..settings.lastBackup = 200).toJson());
+    expect(mem.settings.lastBackup, 500);
+  });
+
   test('indian money format', () {
     expect(money(178287), '₹1,78,287');
     expect(money(899), '₹899');

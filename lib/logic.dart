@@ -241,3 +241,10 @@ MonthTotal monthData(List<Bill> bills, String k) {
 
 List<String> lastKeys(DateTime today, int n) =>
     [for (var i = n - 1; i >= 0; i--) shiftKey(keyOf(today), -i)];
+
+/// The daily background job may write `lastBackup` while the app holds older
+/// data in memory. Before saving, keep whichever value is newer.
+void keepNewerBackup(AppData mem, Map<String, dynamic> diskJson) {
+  final disk = (diskJson['settings'] as Map?)?['lastBackup'];
+  if (disk is num && disk.toInt() > mem.settings.lastBackup) mem.settings.lastBackup = disk.toInt();
+}

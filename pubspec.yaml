@@ -22,6 +22,7 @@ dependencies:
   flutter_secure_storage: any
   archive: any
   share_plus: any
+  workmanager: any
 
 dev_dependencies:
   flutter_test:

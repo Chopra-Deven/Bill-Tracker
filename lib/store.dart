@@ -52,6 +52,11 @@ class AppStore extends ChangeNotifier {
 
   Future<void> save({bool sideEffects = true}) async {
     final f = await _dataFile();
+    try {
+      if (await f.exists()) keepNewerBackup(data, jsonDecode(await f.readAsString()));
+    } catch (e) {
+      debugPrint('read before save failed: $e');
+    }
     final tmp = File('${f.path}.tmp');
     await tmp.writeAsString(jsonEncode(data.toJson()));
     await tmp.rename(f.path);
