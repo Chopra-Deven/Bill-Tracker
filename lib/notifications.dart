@@ -122,32 +122,10 @@ class Notifs {
     if (!_inited) await init();
     await plugin.cancelAll();
     final now = DateTime.now();
-    final today = dateOnly(now);
     final exact = await _android?.canScheduleExactNotifications() ?? false;
     final mode = exact ? AndroidScheduleMode.exactAllowWhileIdle : AndroidScheduleMode.inexactAllowWhileIdle;
-    var count = 0;
-    for (final b in d.bills) {
-      if (!b.rem.on) continue;
-      final open = openCycles(b, today);
-      for (var slot = 0; slot < open.length; slot++) {
-        final a = open[slot];
-        if (a.c.dismissed) continue;
-        final start = a.due.subtract(Duration(days: b.rem.before));
-        // Every day from the start date until two weeks after the due date.
-        for (var i = 0; i <= b.rem.before + 14 && i < 99; i++) {
-          final day = DateTime(start.year, start.month, start.day + i);
-          final at = DateTime(day.year, day.month, day.day, b.rem.hour, b.rem.minute);
-          if (!at.isAfter(now)) continue;
-          if (at.millisecondsSinceEpoch < a.c.snoozedUntil) continue;
-          await _schedule(b.nid * 1000 + slot * 100 + i, b, a.key, a.due, at, mode);
-          if (++count >= 400) return;
-        }
-        if (a.c.snoozedUntil > now.millisecondsSinceEpoch) {
-          final at = DateTime.fromMillisecondsSinceEpoch(a.c.snoozedUntil);
-          await _schedule(b.nid * 1000 + 900 + slot, b, a.key, a.due, at, mode);
-          count++;
-        }
-      }
+    for (final r in planReminders(d.bills, now)) {
+      await _schedule(r.id, r.bill, r.cycle.key, r.cycle.due, r.at, mode);
     }
   }
 
@@ -177,7 +155,7 @@ class Notifs {
     if (list.isEmpty) return false;
     final (b, info) = list.first;
     await plugin.show(
-        id: b.nid * 1000 + 990,
+        id: b.nid * 10000 + 9990,
         title: remTitle(b, info.a.days),
         body: _body(b, info.a.key, info.a.due),
         notificationDetails: _details(b),
@@ -198,7 +176,7 @@ class Notifs {
         final ok = await st.snooze(b, key: key);
         if (!ok) {
           await plugin.show(
-              id: b.nid * 1000 + 998,
+              id: b.nid * 10000 + 9998,
               title: 'No snoozes left',
               body: '${b.name}: pay it and ${b.rem.requireReceipt ? 'upload the receipt' : 'mark it paid'} to stop reminders.',
               notificationDetails: _info);
@@ -208,7 +186,7 @@ class Notifs {
         final amt = double.tryParse((r.input ?? '').replaceAll(RegExp(r'[^0-9.]'), ''));
         if (amt == null || amt <= 0) {
           await plugin.show(
-              id: b.nid * 1000 + 997,
+              id: b.nid * 10000 + 9997,
               title: 'Payment not saved',
               body: 'Enter the amount you paid for ${b.name}, for example 2450.',
               notificationDetails: _info);
@@ -216,7 +194,7 @@ class Notifs {
         }
         await st.pay(b, key, amount: amt, paidOn: fmtDate(DateTime.now()), via: b.via);
         await plugin.show(
-            id: b.nid * 1000 + 996,
+            id: b.nid * 10000 + 9996,
             title: '${b.name} marked paid',
             body: '${money(amt)} for the ${monthName(key)} bill. Reminders stopped.',
             notificationDetails: _info);
