@@ -305,15 +305,122 @@ flowchart TD
 
 ---
 
-## 7. Supporting flows
+## 7. Supporting flows and data storage
 
-**App start** (`main.dart`): load the JSON, initialise notifications, start the UI. After the first frame, request permissions (if there are bills), `rescheduleAll`, update the widgets, run the auto-backup if due, handle a notification that launched the app, and handle a shared file.
+### 7.1 App start and resume
+
+**App start** (`main.dart`): load the JSON, initialise notifications, register the daily background job, and start the UI. After the first frame: request permissions (if there are bills), `rescheduleAll`, update the widgets, run the auto-backup if due, handle a notification that launched the app, and handle a shared file.
 
 **App resume**: reload the JSON (background notification actions may have changed it) and refresh the widgets. LockGate checks the lock-after delay.
 
-**Backup**: zip of `bills.json`, `payments.csv` and the files under their relative paths, saved to `BillTracker/Backups/BillTracker_backup_<date>_<hhmm>.zip`. Only the 5 newest are kept.
+### 7.2 Where data is stored
 
-**Restore**: read `bills.json`, write the files under the base folder (entries that would land outside it are skipped and counted), rewrite each file path to this phone's folder, keep this phone's settings, and replace all data.
+Data lives in two places: one private JSON file for all records, and a `BillTracker` folder for receipts, statements and backups.
+
+```
+Phone
+├── App private storage   (/data/data/com.deven.billtracker/)
+│   ├── app_flutter/billtracker.json   ← all bills, payments and settings
+│   ├── Secure storage (Keystore)      ← PIN hash, failed-try count, lockout time
+│   └── Plugin data                    ← scheduled reminders, widget values
+│
+└── BillTracker folder
+    ├── Receipts/<Bill_Name>/2026-11_screenshot.jpg
+    ├── Statements/<Bill_Name>/2026-11_statement.pdf
+    └── Backups/BillTracker_backup_2026-11-06_2015.zip
+```
+
+| What | Where | Visible in a file manager | Removed on uninstall / Clear storage |
+|---|---|---|---|
+| Bills, monthly payment records, app settings | `billtracker.json` in the app documents dir (`getApplicationDocumentsDirectory`) | No | Yes |
+| PIN (salted hash) and lockout state | `flutter_secure_storage` (Android Keystore) | No | Yes |
+| Scheduled reminders, widget values | Plugin storage, rebuilt from the JSON on every save and by the daily job | No | Yes |
+| Receipts, statements, backups, with **All files access** | `/storage/emulated/0/BillTracker` | Yes | **No** |
+| Receipts, statements, backups, **without** All files access | `/storage/emulated/0/Android/data/com.deven.billtracker/files/BillTracker` | Hard to reach on Android 11+ | **Yes** |
+
+`AppStore.baseDir()` picks the folder each time it is needed, so after All files access is granted, new files go to the main-storage folder while older files stay where they were saved.
+
+**What the JSON holds** (see §4 for every field):
+- Each bill: name, category, due day, statement day, limit, usual app, start month, and reminder settings.
+- Each month's record (key `"yyyy-mm"`): paid or not, amount, paid-on date, app used, snooze and stop state, and the **absolute path** of its receipt and statement. The file itself is not in the JSON.
+- App settings: lock, lock delay, and auto-backup settings with the time of the last backup.
+
+### 7.3 How a save works
+
+```
+Any change (add / edit / delete bill, payment, snooze, attach, settings)
+  → AppStore.save():
+      1. Read the JSON on disk and keep a newer lastBackup if the
+         background job wrote one (keepNewerBackup)
+      2. Write all data to a temp file unique to this isolate
+      3. Rename the temp file over billtracker.json
+  → notifyListeners(): screens refresh
+  → onChanged: Notifs.rescheduleAll() + WidgetSync.update()
+```
+
+Writing to a temp file and renaming it means a crash or power loss leaves either the old or the new file, never a half-written one. Settings-only saves (`sideEffects: false`) skip the re-plan.
+
+### 7.4 Adding a bill
+
+The form builds a `Bill` (id from the current time, `startKey` from the first due date). `AppStore.addBill` gives it the next notification number (`nextNid`), then calls `save()`, which reschedules reminders and refreshes the widgets.
+
+### 7.5 Saving a receipt or statement
+
+```
+Shared screenshot / PDF, or "Upload receipt" / "Add statement" / "Attach"
+  → Mark paid screen (amount, date, app)
+  → Save payment:
+      1. AppStore.storeFile COPIES the file to
+         BillTracker/Receipts/<slug(bill name)>/<yyyy-mm>_<slug(file name)>.<ext>
+         (or Statements/...; _2, _3 … when the name is taken; .jpg if no extension)
+      2. The cycle gets paid = true, amount, paidOn, via, and the FileRef path
+      3. save() → reminders and widgets updated
+```
+
+- The original file (gallery, other app, cache) is not touched. The app keeps its own copy.
+- **Attach later**: Bill details → tap a paid month → Attach. Same copy step, then `AppStore.attach`.
+- **Remove payment**: deletes the month's record from the JSON. The files stay in the folder.
+- **Delete bill**: removes the bill from the JSON. Its files are deleted only when "Also delete N receipt and statement files" is ticked.
+- **Mark paid from a notification**: a background isolate loads the JSON, marks the month paid (no file), and saves.
+
+### 7.6 Backup
+
+**Contents** of `BillTracker/Backups/BillTracker_backup_<yyyy-mm-dd>_<hhmm>.zip`:
+
+```
+bills.json      ← full copy of billtracker.json
+payments.csv    ← every paid month (bill, category, month, due date, paid on, amount, app, file paths)
+Receipts/...    ← only when "Include receipts and statements" is on
+Statements/...
+```
+
+Files are added under their path relative to the `BillTracker` folder (`Backup.rel`). A file saved outside that folder goes under `Files/<name>`. Only the 5 newest backups are kept.
+
+| Trigger | What happens | Where the zip ends up |
+|---|---|---|
+| Settings → **Back up now and save to Google Drive** | Makes the zip, records `lastBackup`, opens the share sheet | Backups folder, plus wherever it is shared (pick Drive) |
+| **Auto-backup** (daily / weekly / monthly) | Checked at app start and by the daily background job. Runs when the period has passed. It changes only `lastBackup` on disk (`saveLastBackup`), so payments saved at the same time are kept. | Backups folder only. It is **not** uploaded anywhere. |
+| Settings → **Export CSV** | A CSV of payments in the temp folder, shared through the share sheet | Wherever it is shared. It cannot be restored. |
+
+The PIN is not in the backup.
+
+### 7.7 Restore
+
+Settings → **Restore** → pick a `.zip` → confirm.
+
+1. Read `bills.json` from the zip. If it is missing: "This file is not a Bill Tracker backup."
+2. Extract each receipt and statement into **this phone's** `BillTracker` folder. Entries that would land outside it are skipped and counted (`safeJoin`).
+3. Point each receipt and statement path at this phone's folder. A path that is unsafe is cleared, but the payment record is kept.
+4. Keep **this phone's** lock and backup settings.
+5. **Replace** every bill in the app with the ones from the backup. Nothing is merged.
+6. Save, which reschedules reminders and refreshes the widgets. A toast shows `Restored N bills` (and the count of skipped files, if any).
+
+### 7.8 Practical notes
+
+- **Without All files access, uninstalling or clearing storage loses everything**: the JSON, the receipts and the local backups. Before relying on the app, grant All files access and keep a copy of a backup in Drive.
+- **Moving older files after granting the permission**: back up, then restore. The backup reads each file from the path in the JSON, wherever it is, and the restore puts everything in the new folder.
+- **Removing test data**: phone Settings → Apps → Bill Tracker → Storage → Clear storage, or restore a real backup (which replaces all bills).
+- **Moving to a new phone**: share a backup with files included to Drive, install the app on the new phone, grant All files access, set a PIN there if wanted, and restore.
 
 ---
 
