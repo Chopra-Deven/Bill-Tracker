@@ -208,22 +208,135 @@ class AppSettings {
   }
 }
 
+/// The signed-in user, shown on the Profile screen. Synced to Drive.
+class Profile {
+  String name;
+  String email;
+  String photoUrl;
+
+  Profile({this.name = '', this.email = '', this.photoUrl = ''});
+
+  Map<String, dynamic> toJson() => {'name': name, 'email': email, 'photoUrl': photoUrl};
+
+  static Profile fromJson(Map? j) => j == null
+      ? Profile()
+      : Profile(name: j['name'] ?? '', email: j['email'] ?? '', photoUrl: j['photoUrl'] ?? '');
+}
+
+/// Sync state of this phone. Never uploaded.
+class SyncSession {
+  String accountId; // Google account id that owns this phone's data
+  String email;
+  bool firstSyncDone;
+  int baseRev; // Drive data rev this phone last matched
+  bool pending; // local changes not yet in Drive
+  bool conflict; // phone and Drive both changed; user must choose
+  int lastSyncAt; // epoch ms of the last successful sync
+  List<String> pendingDeletes; // relative paths to delete from Drive
+
+  SyncSession({
+    this.accountId = '',
+    this.email = '',
+    this.firstSyncDone = false,
+    this.baseRev = 0,
+    this.pending = false,
+    this.conflict = false,
+    this.lastSyncAt = 0,
+    List<String>? pendingDeletes,
+  }) : pendingDeletes = pendingDeletes ?? [];
+
+  bool get signedIn => accountId.isNotEmpty;
+
+  Map<String, dynamic> toJson() => {
+        'accountId': accountId,
+        'email': email,
+        'firstSyncDone': firstSyncDone,
+        'baseRev': baseRev,
+        'pending': pending,
+        'conflict': conflict,
+        'lastSyncAt': lastSyncAt,
+        'pendingDeletes': pendingDeletes,
+      };
+
+  static SyncSession fromJson(Map? j) {
+    if (j == null) return SyncSession();
+    return SyncSession(
+      accountId: j['accountId'] ?? '',
+      email: j['email'] ?? '',
+      firstSyncDone: j['firstSyncDone'] == true,
+      baseRev: (j['baseRev'] as num?)?.toInt() ?? 0,
+      pending: j['pending'] == true,
+      conflict: j['conflict'] == true,
+      lastSyncAt: (j['lastSyncAt'] as num?)?.toInt() ?? 0,
+      pendingDeletes: ((j['pendingDeletes'] as List?) ?? []).map((e) => '$e').toList(),
+    );
+  }
+}
+
 class AppData {
   List<Bill> bills;
   AppSettings settings;
   int nextNid;
+  Profile profile;
+  SyncSession session;
+  int rev; // revision of the data, raised on every upload to Drive
 
-  AppData({List<Bill>? bills, AppSettings? settings, this.nextNid = 1})
+  AppData({List<Bill>? bills, AppSettings? settings, this.nextNid = 1, Profile? profile, SyncSession? session, this.rev = 0})
       : bills = bills ?? [],
-        settings = settings ?? AppSettings();
+        settings = settings ?? AppSettings(),
+        profile = profile ?? Profile(),
+        session = session ?? SyncSession();
 
   Map<String, dynamic> toJson() => {
         'app': 'BillTracker',
         'version': 1,
         'nextNid': nextNid,
+        'rev': rev,
         'settings': settings.toJson(),
+        'profile': profile.toJson(),
+        'session': session.toJson(),
         'bills': bills.map((b) => b.toJson()).toList(),
       };
+
+  /// What goes to Drive: no per-phone settings or sync state, and file paths
+  /// converted by [toRel] (absolute on the phone → relative in Drive).
+  Map<String, dynamic> toCloudJson(String Function(String absPath) toRel) {
+    final j = toJson()
+      ..remove('settings')
+      ..remove('session');
+    for (final b in (j['bills'] as List)) {
+      for (final c in (b['cycles'] as Map).values) {
+        for (final k in ['receipt', 'statement']) {
+          final f = c[k];
+          if (f != null) c[k] = {...f, 'path': toRel(f['path'] as String)};
+        }
+      }
+    }
+    return j;
+  }
+
+  /// Builds data downloaded from Drive. [toAbs] turns a relative path into a
+  /// path on this phone, or null when it is unsafe (that file ref is dropped).
+  /// This phone's [keepSettings] and [keepSession] are kept.
+  static AppData fromCloudJson(Map<String, dynamic> j, String? Function(String rel) toAbs, AppSettings keepSettings,
+      SyncSession keepSession) {
+    final d = AppData.fromJson(j);
+    for (final b in d.bills) {
+      for (final c in b.cycles.values) {
+        FileRef? fix(FileRef? f) {
+          if (f == null) return null;
+          final abs = toAbs(f.path);
+          return abs == null ? null : (f..path = abs);
+        }
+
+        c.receipt = fix(c.receipt);
+        c.statement = fix(c.statement);
+      }
+    }
+    d.settings = keepSettings;
+    d.session = keepSession;
+    return d;
+  }
 
   factory AppData.fromJson(Map<String, dynamic> j) {
     final bills = ((j['bills'] as List?) ?? [])
@@ -238,6 +351,9 @@ class AppData {
       settings: AppSettings.fromJson(
           j['settings'] == null ? null : Map<String, dynamic>.from(j['settings'])),
       nextNid: next,
+      profile: Profile.fromJson(j['profile'] as Map?),
+      session: SyncSession.fromJson(j['session'] as Map?),
+      rev: (j['rev'] as num?)?.toInt() ?? 0,
     );
   }
 }
