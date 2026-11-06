@@ -56,26 +56,77 @@ ActiveCycle cycleFor(Bill b, String k, DateTime today) {
   return ActiveCycle(k, due, days, getC(b, k), st);
 }
 
-/// The bill month that needs attention: last month if unpaid, else this month if
-/// unpaid, else next month.
+/// How many months before the current one are still checked for unpaid bills.
+const int lookbackMonths = 3;
+
+/// The bill month that needs attention: the oldest unpaid month from
+/// [lookbackMonths] ago up to this month, else next month (or the first bill
+/// month when that is still in the future).
 ActiveCycle active(Bill b, DateTime today) {
   final tk = keyOf(today);
-  final pk = shiftKey(tk, -1);
-  if (b.startKey.compareTo(pk) <= 0 && !getC(b, pk).paid) return cycleFor(b, pk, today);
-  if (b.startKey.compareTo(tk) <= 0 && !getC(b, tk).paid) return cycleFor(b, tk, today);
+  for (var i = lookbackMonths; i >= 0; i--) {
+    final k = shiftKey(tk, -i);
+    if (b.startKey.compareTo(k) <= 0 && !getC(b, k).paid) return cycleFor(b, k, today);
+  }
   return cycleFor(b, b.startKey.compareTo(tk) > 0 ? b.startKey : shiftKey(tk, 1), today);
 }
 
-/// Unpaid bill months that may still need reminders (last, this and next month).
+/// Unpaid bill months that may still need reminders, oldest first:
+/// from [lookbackMonths] ago up to next month.
 List<ActiveCycle> openCycles(Bill b, DateTime today) {
   final tk = keyOf(today);
   final out = <ActiveCycle>[];
-  for (final k in [shiftKey(tk, -1), tk, shiftKey(tk, 1)]) {
+  for (var i = -lookbackMonths; i <= 1; i++) {
+    final k = shiftKey(tk, i);
     if (b.startKey.compareTo(k) > 0) continue;
     if (getC(b, k).paid) continue;
     out.add(cycleFor(b, k, today));
   }
   return out;
+}
+
+int notifId(int nid, int slot, int day) => nid * 10000 + slot * 100 + day;
+int snoozeId(int nid, int slot) => nid * 10000 + 9000 + slot;
+
+class PlannedReminder {
+  final int id;
+  final Bill bill;
+  final ActiveCycle cycle;
+  final DateTime at;
+  final bool isSnooze;
+  PlannedReminder(this.id, this.bill, this.cycle, this.at, {this.isSnooze = false});
+}
+
+/// Every reminder to schedule from [now]: daily at the bill's time, from
+/// `due - before` days until the month is paid, limited to the next
+/// [horizonDays] days, plus one wake-up per active snooze. Sorted by time and
+/// cut to the [cap] earliest.
+List<PlannedReminder> planReminders(List<Bill> bills, DateTime now, {int cap = 400, int horizonDays = 14}) {
+  final today = dateOnly(now);
+  final out = <PlannedReminder>[];
+  for (final b in bills) {
+    if (!b.rem.on) continue;
+    final open = openCycles(b, today);
+    for (var s = 0; s < open.length; s++) {
+      final a = open[s];
+      if (a.c.dismissed) continue;
+      final start = a.due.subtract(Duration(days: b.rem.before));
+      for (var d = 0; d <= horizonDays; d++) {
+        final day = DateTime(today.year, today.month, today.day + d);
+        if (day.isBefore(start)) continue;
+        final at = DateTime(day.year, day.month, day.day, b.rem.hour, b.rem.minute);
+        if (!at.isAfter(now)) continue;
+        if (at.millisecondsSinceEpoch < a.c.snoozedUntil) continue;
+        out.add(PlannedReminder(notifId(b.nid, s, d), b, a, at));
+      }
+      if (a.c.snoozedUntil > now.millisecondsSinceEpoch) {
+        out.add(PlannedReminder(snoozeId(b.nid, s), b, a, DateTime.fromMillisecondsSinceEpoch(a.c.snoozedUntil),
+            isSnooze: true));
+      }
+    }
+  }
+  out.sort((x, y) => x.at.compareTo(y.at));
+  return out.length > cap ? out.sublist(0, cap) : out;
 }
 
 bool paidNow(Bill b, DateTime today) => getC(b, keyOf(today)).paid;

@@ -24,7 +24,7 @@ void main() {
   });
 
   test('unpaid last month stays active and overdue', () {
-    final b = bill(due: 3);
+    final b = bill(due: 3, start: '2026-10');
     b.cycles['2026-10'] = Cycle(paid: true, amount: 100);
     final a = active(b, DateTime(2026, 11, 6));
     expect(a.key, '2026-11');
@@ -33,7 +33,7 @@ void main() {
   });
 
   test('paying this month moves to next month', () {
-    final b = bill(due: 12);
+    final b = bill(due: 12, start: '2026-10');
     b.cycles['2026-10'] = Cycle(paid: true);
     b.cycles['2026-11'] = Cycle(paid: true);
     final a = active(b, DateTime(2026, 11, 6));
@@ -43,7 +43,7 @@ void main() {
   });
 
   test('reminder window and snooze', () {
-    final b = bill(due: 8);
+    final b = bill(due: 8, start: '2026-10');
     b.cycles['2026-10'] = Cycle(paid: true);
     final now = DateTime(2026, 11, 6, 10);
     expect(remState(b, now).state, RemState.active);
@@ -55,6 +55,60 @@ void main() {
   test('open cycles skip paid months and months before start', () {
     final b = bill(due: 8, start: '2026-11');
     expect(openCycles(b, DateTime(2026, 11, 6)).map((c) => c.key), ['2026-11', '2026-12']);
+  });
+
+  test('lookback ignores months older than 3', () {
+    final b = bill(due: 8, start: '2026-06');
+    final a = active(b, DateTime(2026, 11, 6));
+    expect(a.key, '2026-08');
+    expect(openCycles(b, DateTime(2026, 11, 6)).map((c) => c.key),
+        ['2026-08', '2026-09', '2026-10', '2026-11', '2026-12']);
+  });
+
+  test('active picks oldest unpaid within lookback', () {
+    final b = bill(due: 8, start: '2026-08');
+    b.cycles['2026-08'] = Cycle(paid: true);
+    expect(active(b, DateTime(2026, 11, 6)).key, '2026-09');
+  });
+
+  test('planner keeps reminding overdue month past due+14', () {
+    final b = bill(due: 1, start: '2026-10');
+    final now = DateTime(2026, 11, 20, 8);
+    final p = planReminders([b], now).where((r) => r.cycle.key == '2026-10').toList();
+    expect(p.first.at, DateTime(2026, 11, 20, 9));
+    expect(p.length, 15);
+  });
+
+  test('planner clamps due day', () {
+    final b = bill(due: 31, start: '2027-02');
+    final p = planReminders([b], DateTime(2027, 2, 20, 10));
+    expect(p.first.cycle.due, DateTime(2027, 2, 28));
+    expect(p.first.at, DateTime(2027, 2, 23, 9));
+  });
+
+  test('planner respects snooze', () {
+    final b = bill(due: 8, start: '2026-11');
+    final now = DateTime(2026, 11, 6, 8);
+    b.cycles['2026-11'] = Cycle(snoozes: 1, snoozedUntil: DateTime(2026, 11, 7, 12).millisecondsSinceEpoch);
+    final nov = planReminders([b], now).where((r) => r.cycle.key == '2026-11').toList();
+    expect(nov.where((r) => r.isSnooze).single.at, DateTime(2026, 11, 7, 12));
+    expect(nov.where((r) => !r.isSnooze).first.at, DateTime(2026, 11, 8, 9));
+  });
+
+  test('planner cap keeps the earliest reminders', () {
+    final bills = [for (var i = 0; i < 40; i++) bill(due: 8 + i % 10, start: '2026-11')..nid = i + 1];
+    final all = planReminders(bills, DateTime(2026, 11, 1, 0), cap: 100000);
+    expect(all.length, greaterThan(100));
+    final p = planReminders(bills, DateTime(2026, 11, 1, 0), cap: 100);
+    expect(p.length, 100);
+    expect(p.last.at.isAfter(all[100].at), isFalse);
+  });
+
+  test('planner ids are unique and below 2^31', () {
+    final bills = [for (var i = 0; i < 5; i++) bill(start: '2026-08')..nid = 200000 + i];
+    final ids = planReminders(bills, DateTime(2026, 11, 6, 8)).map((r) => r.id).toList();
+    expect(ids.toSet().length, ids.length);
+    expect(ids.every((i) => i < 2147483647), isTrue);
   });
 
   test('indian money format', () {
