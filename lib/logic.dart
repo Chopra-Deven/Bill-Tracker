@@ -256,3 +256,10 @@ String newStartKey(Bill b, DateTime picked) {
   final paid = b.cycles.entries.where((e) => e.value.paid).map((e) => e.key).toList()..sort();
   return paid.isNotEmpty && paid.first.compareTo(k) < 0 ? paid.first : k;
 }
+
+/// Bills whose next bill is due between today and [days] days from now
+/// (overdue bills are not counted).
+int countDueWithin(List<Bill> bills, DateTime today, int days) => bills.where((b) {
+      final a = active(b, today);
+      return a.days >= 0 && a.days <= days;
+    }).length;

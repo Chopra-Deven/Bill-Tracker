@@ -83,10 +83,7 @@ class HomeTab extends StatelessWidget {
         final paid = bills.where((b) => paidNow(b, t)).toList()
           ..sort((x, y) => (getC(y, tk).paidOn ?? '').compareTo(getC(x, tk).paidOn ?? ''));
         final overdue = bills.where((b) => active(b, t).st == DueState.overdue).length;
-        final week = bills.where((b) {
-          final a = active(b, t);
-          return a.days >= 0 && a.days <= 7;
-        }).length;
+        final week = countDueWithin(bills, t, 7);
         final paidSum = paid.fold<double>(0, (s, b) => s + (getC(b, tk).amount ?? 0));
         return ListView(
           padding: const EdgeInsets.fromLTRB(16, 4, 16, 96),

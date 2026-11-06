@@ -25,7 +25,7 @@ class WidgetSync {
           await HomeWidget.saveWidgetData<bool>('r${i}_late', false);
         }
       }
-      final week = d.bills.where((b) => active(b, today).days <= 7).length;
+      final week = countDueWithin(d.bills, today, 7);
       final over = d.bills.where((b) => active(b, today).st == DueState.overdue).length;
       await HomeWidget.saveWidgetData<String>('w_week', '$week');
       await HomeWidget.saveWidgetData<String>('w_over', over > 0 ? '$over overdue' : 'none overdue');

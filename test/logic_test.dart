@@ -134,6 +134,13 @@ void main() {
     expect(newStartKey(b, DateTime(2026, 11, 8)), '2026-09');
   });
 
+  test('countDueWithin excludes overdue', () {
+    final over = bill(due: 1, start: '2026-11');
+    final soon = bill(due: 10, start: '2026-11');
+    final far = bill(due: 30, start: '2026-11');
+    expect(countDueWithin([over, soon, far], DateTime(2026, 11, 6), 7), 1);
+  });
+
   test('indian money format', () {
     expect(money(178287), '₹1,78,287');
     expect(money(899), '₹899');
