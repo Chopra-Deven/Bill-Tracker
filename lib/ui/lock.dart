@@ -1,7 +1,11 @@
+import 'dart:async';
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:local_auth/local_auth.dart';
 
+import '../pin_policy.dart';
 import '../store.dart';
 import 'common.dart';
 
@@ -10,9 +14,52 @@ class LockService {
   static const _ss = FlutterSecureStorage();
   static int _outside = 0;
 
-  static Future<void> setPin(String p) => _ss.write(key: 'pin', value: p);
-  static Future<void> clearPin() => _ss.delete(key: 'pin');
-  static Future<bool> check(String p) async => (await _ss.read(key: 'pin')) == p;
+  static String _salt() {
+    final r = Random.secure();
+    return List.generate(16, (_) => r.nextInt(256).toRadixString(16).padLeft(2, '0')).join();
+  }
+
+  static Future<void> resetFails() async {
+    await _ss.delete(key: 'pin_fail');
+    await _ss.delete(key: 'pin_until');
+  }
+
+  static Future<void> setPin(String p) async {
+    await _ss.write(key: 'pin', value: hashPin(p, _salt()));
+    await resetFails();
+  }
+
+  static Future<void> clearPin() async {
+    await _ss.delete(key: 'pin');
+    await resetFails();
+  }
+
+  /// Time left before another PIN try is allowed.
+  static Future<Duration> waitLeft() async {
+    final until = int.tryParse(await _ss.read(key: 'pin_until') ?? '') ?? 0;
+    final left = until - DateTime.now().millisecondsSinceEpoch;
+    return left > 0 ? Duration(milliseconds: left) : Duration.zero;
+  }
+
+  /// False while locked out, or when the PIN is wrong (which counts a failure).
+  static Future<bool> check(String p) async {
+    if (await waitLeft() > Duration.zero) return false;
+    final stored = await _ss.read(key: 'pin');
+    if (stored != null && verifyStored(stored, p)) {
+      if (needsUpgrade(stored)) await _ss.write(key: 'pin', value: hashPin(p, _salt()));
+      await resetFails();
+      return true;
+    }
+    final n = (int.tryParse(await _ss.read(key: 'pin_fail') ?? '') ?? 0) + 1;
+    await _ss.write(key: 'pin_fail', value: '$n');
+    final w = lockoutFor(n);
+    if (w > Duration.zero) {
+      await _ss.write(key: 'pin_until', value: '${DateTime.now().millisecondsSinceEpoch + w.inMilliseconds}');
+    }
+    return false;
+  }
+
+  static String waitText(Duration d) => 'Too many tries. Try again in ${(d.inMilliseconds / 1000).ceil()}s.';
 
   static void lockNow() {
     if (AppStore.I.settings.lockOn) locked.value = true;
@@ -72,7 +119,10 @@ class LockService {
       ),
     );
     if (!context.mounted) return ok == true;
-    if (ok == false && ctrl.text.isNotEmpty) toast(context, 'That PIN is not right.');
+    if (ok == false && ctrl.text.isNotEmpty) {
+      final w = await waitLeft();
+      if (context.mounted) toast(context, w > Duration.zero ? waitText(w) : 'That PIN is not right.');
+    }
     return ok == true;
   }
 }
@@ -179,19 +229,39 @@ class LockScreen extends StatefulWidget {
 class _LockScreenState extends State<LockScreen> {
   String pin = '';
   bool wrong = false;
+  Duration wait = Duration.zero;
+  Timer? _tick;
 
   @override
   void initState() {
     super.initState();
+    _refreshWait();
     WidgetsBinding.instance.addPostFrameCallback((_) => _bio());
   }
 
+  @override
+  void dispose() {
+    _tick?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _refreshWait() async {
+    final w = await LockService.waitLeft();
+    if (!mounted) return;
+    setState(() => wait = w);
+    _tick?.cancel();
+    if (w > Duration.zero) _tick = Timer(const Duration(seconds: 1), _refreshWait);
+  }
+
   Future<void> _bio() async {
-    if (await LockService.biometric()) LockService.locked.value = false;
+    if (await LockService.biometric()) {
+      await LockService.resetFails();
+      LockService.locked.value = false;
+    }
   }
 
   Future<void> _digit(String d) async {
-    if (pin.length >= 4) return;
+    if (pin.length >= 4 || wait > Duration.zero) return;
     setState(() {
       pin += d;
       wrong = false;
@@ -204,6 +274,7 @@ class _LockScreenState extends State<LockScreen> {
           pin = '';
           wrong = true;
         });
+        await _refreshWait();
       }
     }
   }
@@ -236,8 +307,15 @@ class _LockScreenState extends State<LockScreen> {
               const SizedBox(height: 12),
               const Text('Bill Tracker is locked', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
               const SizedBox(height: 4),
-              Text(wrong ? 'Wrong PIN. Try again.' : 'Enter your PIN',
-                  style: TextStyle(color: wrong ? p.bad : p.muted, fontWeight: wrong ? FontWeight.w600 : FontWeight.w400)),
+              Text(
+                  wait > Duration.zero
+                      ? LockService.waitText(wait)
+                      : wrong
+                          ? 'Wrong PIN. Try again.'
+                          : 'Enter your PIN',
+                  style: TextStyle(
+                      color: wrong || wait > Duration.zero ? p.bad : p.muted,
+                      fontWeight: wrong || wait > Duration.zero ? FontWeight.w600 : FontWeight.w400)),
               const SizedBox(height: 20),
               Row(mainAxisSize: MainAxisSize.min, children: [
                 for (var i = 0; i < 4; i++)
