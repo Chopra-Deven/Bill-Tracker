@@ -263,3 +263,10 @@ int countDueWithin(List<Bill> bills, DateTime today, int days) => bills.where((b
       final a = active(b, today);
       return a.days >= 0 && a.days <= days;
     }).length;
+
+/// Every receipt and statement path saved for [b], each once.
+List<String> billFilePaths(Bill b) => {
+      for (final c in b.cycles.values)
+        for (final f in [c.receipt, c.statement])
+          if (f != null) f.path,
+    }.toList();

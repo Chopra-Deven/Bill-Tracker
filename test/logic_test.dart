@@ -141,6 +141,13 @@ void main() {
     expect(countDueWithin([over, soon, far], DateTime(2026, 11, 6), 7), 1);
   });
 
+  test('billFilePaths lists receipts and statements once', () {
+    final b = bill()
+      ..cycles['2026-10'] = Cycle(paid: true, receipt: FileRef('a', '/x/a.jpg'), statement: FileRef('s', '/x/s.pdf'))
+      ..cycles['2026-11'] = Cycle(paid: true, receipt: FileRef('a', '/x/a.jpg'));
+    expect(billFilePaths(b)..sort(), ['/x/a.jpg', '/x/s.pdf']);
+  });
+
   test('indian money format', () {
     expect(money(178287), '₹1,78,287');
     expect(money(899), '₹899');

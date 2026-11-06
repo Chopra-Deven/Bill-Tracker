@@ -129,9 +129,27 @@ class AppStore extends ChangeNotifier {
 
   Future<void> updateBill() => save();
 
-  Future<void> deleteBill(String id) async {
-    data.bills.removeWhere((b) => b.id == id);
+  /// Removes the bill. With [deleteFiles], also deletes its receipt and
+  /// statement files. Returns how many files were deleted.
+  Future<int> deleteBill(String id, {bool deleteFiles = false}) async {
+    final b = find(id);
+    var n = 0;
+    if (b != null && deleteFiles) {
+      for (final path in billFilePaths(b)) {
+        try {
+          final f = File(path);
+          if (await f.exists()) {
+            await f.delete();
+            n++;
+          }
+        } catch (e) {
+          debugPrint('delete file failed: $e');
+        }
+      }
+    }
+    data.bills.removeWhere((x) => x.id == id);
     await save();
+    return n;
   }
 
   Future<void> pay(Bill b, String key,

@@ -133,10 +133,12 @@ class _BillDetailPageState extends State<BillDetailPage> {
                 child: OutlinedButton(
                   style: OutlinedButton.styleFrom(foregroundColor: p.bad),
                   onPressed: () async {
-                    if (await confirm(context, 'Delete ${b.name}?',
-                        'The bill, its payment history and reminders are removed. Receipt files stay in the BillTracker folder.', 'Delete')) {
-                      await AppStore.I.deleteBill(b.id);
-                      if (context.mounted) Navigator.pop(context);
+                    final files = await _confirmDelete(context, b);
+                    if (files == null) return;
+                    final n = await AppStore.I.deleteBill(b.id, deleteFiles: files);
+                    if (context.mounted) {
+                      if (files) toast(context, 'Deleted ${b.name} and $n file${n == 1 ? '' : 's'}');
+                      Navigator.pop(context);
                     }
                   },
                   child: const Text('Delete bill'),
@@ -211,6 +213,38 @@ class _BillDetailPageState extends State<BillDetailPage> {
         child: Text(t,
             style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Theme.of(context).colorScheme.primary)),
       );
+}
+
+/// Asks before deleting a bill. Returns null when cancelled, otherwise
+/// whether its receipt and statement files should be deleted too.
+Future<bool?> _confirmDelete(BuildContext context, Bill b) {
+  final count = billFilePaths(b).length;
+  var files = false;
+  return showDialog<bool>(
+    context: context,
+    builder: (c) => StatefulBuilder(
+      builder: (c, set) => AlertDialog(
+        title: Text('Delete ${b.name}?'),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(files || count == 0
+              ? 'The bill, its payment history and reminders are removed.'
+              : 'The bill, its payment history and reminders are removed. Receipt files stay in the BillTracker folder.'),
+          if (count > 0)
+            CheckboxListTile(
+              contentPadding: EdgeInsets.zero,
+              controlAffinity: ListTileControlAffinity.leading,
+              value: files,
+              onChanged: (v) => set(() => files = v ?? false),
+              title: Text('Also delete $count receipt and statement file${count == 1 ? '' : 's'}'),
+            ),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(c, files), child: const Text('Delete')),
+        ],
+      ),
+    ),
+  );
 }
 
 /// Bottom sheet with one payment: amount, paid via, dates, receipt and statement.
