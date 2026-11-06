@@ -50,3 +50,12 @@ bool isSyncedFolder(String rel) => rel.startsWith('Receipts/') || rel.startsWith
 
 Set<String> filesToUpload(Set<String> localRel, Set<String> remoteRel) => localRel.difference(remoteRel);
 Set<String> filesToDownload(Set<String> localRel, Set<String> remoteRel) => remoteRel.difference(localRel);
+
+/// True only when the account that is signed in now is the one that owns
+/// this phone's data.
+bool sameAccount(String sessionId, String? signedInId) =>
+    sessionId.isNotEmpty && signedInId != null && sessionId == signedInId;
+
+/// Relative paths to delete from Drive when the user deletes these files.
+List<String> deletesFor(Iterable<String> absPaths) =>
+    [for (final p in absPaths) if (relPath(p) case final r? when isSyncedFolder(r)) r];

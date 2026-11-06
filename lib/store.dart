@@ -8,6 +8,7 @@ import 'package:permission_handler/permission_handler.dart';
 
 import 'logic.dart';
 import 'models.dart';
+import 'sync/sync_logic.dart';
 
 /// Holds all app data, saves it to a JSON file, and copies receipts and
 /// statements into the BillTracker folder on the phone.
@@ -21,6 +22,12 @@ class AppStore extends ChangeNotifier {
   /// Called after every change (notifications, widget). Set in main.dart.
   Future<void> Function(AppData data)? onChanged;
 
+  /// Called after a save that marked changes pending (schedules a Drive upload).
+  void Function()? onPending;
+
+  /// Raised on every save that marks changes pending.
+  int generation = 0;
+
   List<Bill> get bills => data.bills;
   AppSettings get settings => data.settings;
   DateTime get today => dateOnly(DateTime.now());
@@ -33,6 +40,8 @@ class AppStore extends ChangeNotifier {
   }
 
   // ---------- persistence ----------
+  static Future<File> dataFile() => _dataFile();
+
   static Future<File> _dataFile() async {
     final dir = await getApplicationDocumentsDirectory();
     return File('${dir.path}/billtracker.json');
@@ -51,7 +60,13 @@ class AppStore extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> save({bool sideEffects = true}) async {
+  /// Saves to disk. [markPending] (default) records that this change still has
+  /// to reach Drive; sync's own saves pass false.
+  Future<void> save({bool sideEffects = true, bool markPending = true}) async {
+    if (markPending) {
+      data.session.pending = true;
+      generation++;
+    }
     final f = await _dataFile();
     try {
       if (await f.exists()) keepNewerBackup(data, jsonDecode(await f.readAsString()));
@@ -60,6 +75,7 @@ class AppStore extends ChangeNotifier {
     }
     await _writeAtomic(f, jsonEncode(data.toJson()));
     notifyListeners();
+    if (markPending) onPending?.call();
     if (sideEffects && onChanged != null) {
       try {
         await onChanged!(data);
@@ -82,7 +98,7 @@ class AppStore extends ChangeNotifier {
   Future<void> saveLastBackup(int ms) async {
     data.settings.lastBackup = ms;
     final f = await _dataFile();
-    if (!await f.exists()) return save(sideEffects: false);
+    if (!await f.exists()) return save(sideEffects: false, markPending: false);
     await _writeAtomic(f, jsonEncode(patchLastBackup(jsonDecode(await f.readAsString()), ms)));
   }
 
@@ -151,6 +167,9 @@ class AppStore extends ChangeNotifier {
     final b = find(id);
     var n = 0;
     if (b != null && deleteFiles) {
+      for (final r in deletesFor(billFilePaths(b))) {
+        if (!data.session.pendingDeletes.contains(r)) data.session.pendingDeletes.add(r);
+      }
       for (final path in billFilePaths(b)) {
         try {
           final f = File(path);

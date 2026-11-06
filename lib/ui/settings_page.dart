@@ -75,14 +75,14 @@ class _SettingsPageState extends State<SettingsPage> {
                       if (pin == null) return;
                       await LockService.setPin(pin);
                       s.lockOn = true;
-                      await AppStore.I.save(sideEffects: false);
+                      await AppStore.I.save(sideEffects: false, markPending: false);
                       if (context.mounted) toast(context, 'App lock is on');
                     } else {
                       final ok = await LockService.verifyDialog(context);
                       if (!ok) return;
                       s.lockOn = false;
                       await LockService.clearPin();
-                      await AppStore.I.save(sideEffects: false);
+                      await AppStore.I.save(sideEffects: false, markPending: false);
                       if (context.mounted) toast(context, 'App lock turned off');
                     }
                   },
@@ -100,7 +100,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       ],
                       onChanged: (v) {
                         s.lockAfter = v ?? 1;
-                        AppStore.I.save(sideEffects: false);
+                        AppStore.I.save(sideEffects: false, markPending: false);
                       },
                     ),
                   ]),
@@ -176,7 +176,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       value: s.autoBackup,
                       onChanged: (v) {
                         s.autoBackup = v;
-                        AppStore.I.save(sideEffects: false);
+                        AppStore.I.save(sideEffects: false, markPending: false);
                       },
                     ),
                     Row(children: [
@@ -190,7 +190,7 @@ class _SettingsPageState extends State<SettingsPage> {
                         ],
                         onChanged: (v) {
                           s.backupFreq = v ?? 'weekly';
-                          AppStore.I.save(sideEffects: false);
+                          AppStore.I.save(sideEffects: false, markPending: false);
                         },
                       ),
                     ]),
@@ -201,7 +201,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       value: s.backupFiles,
                       onChanged: (v) {
                         s.backupFiles = v ?? true;
-                        AppStore.I.save(sideEffects: false);
+                        AppStore.I.save(sideEffects: false, markPending: false);
                       },
                     ),
                     const SizedBox(height: 4),
@@ -211,7 +211,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       onPressed: () => _run(() async {
                         final f = await Backup.makeZip(AppStore.I.data, files: s.backupFiles);
                         s.lastBackup = DateTime.now().millisecondsSinceEpoch;
-                        await AppStore.I.save(sideEffects: false);
+                        await AppStore.I.save(sideEffects: false, markPending: false);
                         await LockService.outside(() => SharePlus.instance.share(ShareParams(
                             files: [XFile(f.path)], subject: 'Bill Tracker backup', text: 'Bill Tracker backup')));
                       }),

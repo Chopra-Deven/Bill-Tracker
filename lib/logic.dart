@@ -285,3 +285,12 @@ Map<String, dynamic> patchLastBackup(Map<String, dynamic> diskJson, int ms) {
   settings['lastBackup'] = ms;
   return {...diskJson, 'settings': settings};
 }
+
+/// A restored backup replaces the bills, but this phone keeps its settings,
+/// its sign-in and sync state, and its profile when the backup has no name.
+AppData keepPhoneState(AppData restored, AppData current) {
+  restored.settings = current.settings;
+  restored.session = current.session;
+  if (restored.profile.name.trim().isEmpty) restored.profile = current.profile;
+  return restored;
+}

@@ -1,3 +1,4 @@
+import 'package:bill_tracker/logic.dart';
 import 'package:bill_tracker/models.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -78,5 +79,20 @@ void main() {
     final c = d.bills.single.cycles['2026-11']!;
     expect(c.receipt!.path, '/base/Receipts/X/r.jpg');
     expect(c.statement, isNull);
+  });
+
+  test('restored backup keeps this phone settings, session and profile when backup has none', () {
+    final cur = AppData(settings: AppSettings(lockOn: true))
+      ..session.accountId = 'acc'
+      ..session.baseRev = 4
+      ..profile.name = 'Deven';
+    final old = AppData.fromJson({'bills': [], 'session': {'accountId': 'other'}});
+    final out = keepPhoneState(old, cur);
+    expect(out.settings.lockOn, isTrue);
+    expect(out.session.accountId, 'acc');
+    expect(out.session.baseRev, 4);
+    expect(out.profile.name, 'Deven');
+    final named = AppData()..profile.name = 'From backup';
+    expect(keepPhoneState(named, cur).profile.name, 'From backup');
   });
 }

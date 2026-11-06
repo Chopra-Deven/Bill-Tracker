@@ -123,9 +123,9 @@ class Backup {
         c.statement = fix(c.statement);
       }
     }
-    // Keep this phone's lock and backup settings.
-    d.settings = AppStore.I.settings;
-    await AppStore.I.replaceAll(d);
+    // Keep this phone's settings, sign-in and sync state (and profile when
+    // the backup has none). The restored bills then sync like any change.
+    await AppStore.I.replaceAll(keepPhoneState(d, AppStore.I.data));
     return (d.bills.length, skipped);
   }
 
