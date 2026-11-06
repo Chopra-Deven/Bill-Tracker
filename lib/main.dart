@@ -14,7 +14,7 @@ import 'sync/sync_setup.dart';
 import 'ui/common.dart';
 import 'ui/lock.dart';
 import 'ui/nav.dart';
-import 'ui/tabs.dart';
+import 'ui/auth_pages.dart';
 import 'widget_sync.dart';
 
 Future<void> main() async {
@@ -50,7 +50,7 @@ class _BillTrackerAppState extends State<BillTrackerApp> with WidgetsBindingObse
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    Notifs.onOpen = (id, key, action) {
+    Notifs.onOpen = (id, key, action) => whenHome(() {
       final b = AppStore.I.find(id);
       if (b == null) return;
       if (getC(b, key).paid) {
@@ -58,7 +58,7 @@ class _BillTrackerAppState extends State<BillTrackerApp> with WidgetsBindingObse
       } else {
         openPay(b, key);
       }
-    };
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) => _startup());
   }
 
@@ -86,7 +86,7 @@ class _BillTrackerAppState extends State<BillTrackerApp> with WidgetsBindingObse
   void _onShared(List<SharedMediaFile> files) {
     if (files.isEmpty) return;
     final f = files.first;
-    openSharePick(f.path, f.path.split('/').last);
+    whenHome(() => openSharePick(f.path, f.path.split('/').last));
     ReceiveSharingIntent.instance.reset();
   }
 
@@ -116,7 +116,20 @@ class _BillTrackerAppState extends State<BillTrackerApp> with WidgetsBindingObse
       theme: buildTheme(Brightness.light),
       darkTheme: buildTheme(Brightness.dark),
       builder: (context, child) => LockGate(child: child!),
-      home: const Shell(),
+      home: const Gate(),
     );
   }
+}
+
+/// Runs [f] once Home is showing. Notification taps and shared files that
+/// arrive during sign-in or the first sync wait until then.
+void whenHome(VoidCallback f) {
+  if (Gate.atHome.value) return f();
+  void listener() {
+    if (!Gate.atHome.value) return;
+    Gate.atHome.removeListener(listener);
+    f();
+  }
+
+  Gate.atHome.addListener(listener);
 }

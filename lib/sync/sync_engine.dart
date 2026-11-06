@@ -104,7 +104,7 @@ class SyncEngine {
     await local.saveData(d, markPending: false);
   }
 
-  Future<void> _pull() async {
+  Future<AppData> _remoteData() async {
     final rd = await remote.downloadData();
     Map<String, dynamic> j;
     try {
@@ -117,8 +117,16 @@ class SyncEngine {
     final cur = local.data;
     final d = AppData.fromCloudJson(j, (rel) => safeJoin(base.path, rel), cur.settings, cur.session);
     d.rev = rd.rev;
-    d.session
-      ..baseRev = rd.rev
+    return d;
+  }
+
+  /// Drive's data, for showing a summary. Changes nothing.
+  Future<AppData> peekRemote() => _one(_remoteData);
+
+  Future<void> _pull() async {
+    final d = await _remoteData();
+    d.session = SyncSession.fromJson(d.session.toJson())
+      ..baseRev = d.rev
       ..pending = false
       ..conflict = false
       ..lastSyncAt = DateTime.now().millisecondsSinceEpoch;

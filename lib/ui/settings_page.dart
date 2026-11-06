@@ -4,7 +4,10 @@ import 'package:share_plus/share_plus.dart';
 import '../backup.dart';
 import '../logic.dart';
 import '../store.dart';
+import '../sync/sync_service.dart';
+import 'auth_pages.dart';
 import 'common.dart';
+import 'nav.dart';
 import 'files.dart';
 import 'lock.dart';
 import 'tabs.dart';
@@ -51,7 +54,7 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget build(BuildContext context) {
     final p = Pal.of(context);
     return ListenableBuilder(
-      listenable: AppStore.I,
+      listenable: Listenable.merge([AppStore.I, SyncService.I]),
       builder: (context, _) {
         final s = AppStore.I.settings;
         final files = AppStore.I.bills.fold<int>(
@@ -64,6 +67,18 @@ class _SettingsPageState extends State<SettingsPage> {
             absorbing: busy,
             child: ListView(padding: const EdgeInsets.fromLTRB(16, 0, 16, 32), children: [
               if (busy) const LinearProgressIndicator(),
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Card(
+                  child: ListTile(
+                    leading: const Avatar(size: 40),
+                    title: Text(AppStore.I.data.profile.name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                    subtitle: Text(syncLine(SyncService.I, AppStore.I.data), maxLines: 2, overflow: TextOverflow.ellipsis),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: openProfile,
+                  ),
+                ),
+              ),
               Panel(title: 'App lock', sub: s.lockOn ? 'On' : 'Off', children: [
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,

@@ -4,6 +4,7 @@ import '../logic.dart';
 import '../models.dart';
 import '../notifications.dart';
 import '../store.dart';
+import 'auth_pages.dart';
 import 'common.dart';
 import 'files.dart';
 import 'insights_page.dart';
@@ -32,6 +33,7 @@ class _ShellState extends State<Shell> {
             actions: [
               IconButton(
                   tooltip: 'Settings', onPressed: openSettings, icon: const Icon(Icons.settings_outlined)),
+              IconButton(tooltip: 'Profile', onPressed: openProfile, icon: const Avatar(size: 30)),
               const SizedBox(width: 4),
             ],
           ),

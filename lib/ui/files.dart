@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:open_filex/open_filex.dart';
 
 import '../models.dart';
+import '../sync/sync_service.dart';
 import 'common.dart';
 import 'lock.dart';
 
@@ -28,7 +29,13 @@ Future<String?> pickDocAny() async {
 
 Future<void> openFile(BuildContext context, FileRef f) async {
   if (!await File(f.path).exists()) {
-    if (context.mounted) toast(context, 'File not found. It may have been moved or deleted.');
+    if (context.mounted) {
+      toast(
+          context,
+          SyncService.ready && SyncService.I.downloadingFiles
+              ? 'Still downloading from Google Drive. Try again in a moment.'
+              : 'File not found. It may have been moved or deleted.');
+    }
     return;
   }
   final r = await LockService.outside(() => OpenFilex.open(f.path));

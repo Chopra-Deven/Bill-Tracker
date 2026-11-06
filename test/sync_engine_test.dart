@@ -288,6 +288,18 @@ void main() {
     expect(remote.files.length, 1);
     expect(remote.calls.where((c) => c == 'uploadFile:Receipts/X/a.jpg').length, 1);
   });
+
+  test('peekRemote reads Drive data without changing the phone', () async {
+    remote
+      ..dataJson = driveJson(rev: 4)
+      ..rev = 4;
+    final local = FakeLocal(phoneWithReceipt(), [base]);
+    final d = await SyncEngine(remote: remote, local: local).peekRemote();
+    expect(d.bills.single.name, 'D');
+    expect(d.rev, 4);
+    expect(local.data.bills.single.name, 'X');
+    expect(local.saves, 0);
+  });
 }
 
 /// Remote that runs [onUpload] while the data upload is in flight.
