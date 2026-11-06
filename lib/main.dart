@@ -8,6 +8,9 @@ import 'backup.dart';
 import 'logic.dart';
 import 'notifications.dart';
 import 'store.dart';
+import 'sync/auth_service.dart';
+import 'sync/sync_service.dart';
+import 'sync/sync_setup.dart';
 import 'ui/common.dart';
 import 'ui/lock.dart';
 import 'ui/nav.dart';
@@ -17,7 +20,14 @@ import 'widget_sync.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final st = AppStore.I;
+  try {
+    await AuthService.I.init();
+  } catch (e) {
+    debugPrint('auth init: $e');
+  }
   await st.load();
+  await finishInterruptedLogout();
+  setUpSync();
   st.onChanged = (d) async {
     await Notifs.rescheduleAll(d);
     await WidgetSync.update(d);
@@ -59,6 +69,7 @@ class _BillTrackerAppState extends State<BillTrackerApp> with WidgetsBindingObse
       await Notifs.rescheduleAll(st.data);
       await WidgetSync.update(st.data);
       await Backup.autoIfDue();
+      unawaited(SyncService.I.syncNow());
       await Notifs.handleLaunch();
     } catch (e) {
       debugPrint('startup: $e');
@@ -85,6 +96,7 @@ class _BillTrackerAppState extends State<BillTrackerApp> with WidgetsBindingObse
       // Notification buttons may have changed data while the app was in the background.
       await AppStore.I.load();
       await WidgetSync.update(AppStore.I.data);
+      unawaited(SyncService.I.onResume());
     }
   }
 

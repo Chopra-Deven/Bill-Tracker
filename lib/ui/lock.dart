@@ -24,6 +24,13 @@ class LockService {
     await _ss.delete(key: 'pin_until');
   }
 
+  /// Removes the PIN and its lockout state (logout).
+  static Future<void> clearAll() async {
+    await _ss.delete(key: 'pin');
+    await resetFails();
+    locked.value = false;
+  }
+
   static Future<void> setPin(String p) async {
     await _ss.write(key: 'pin', value: hashPin(p, _salt()));
     await resetFails();

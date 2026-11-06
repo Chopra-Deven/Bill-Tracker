@@ -134,6 +134,31 @@ class AppStore extends ChangeNotifier {
     return i < 0 ? '' : name.substring(i).toLowerCase();
   }
 
+  /// Every BillTracker folder that can hold this app's files and can be
+  /// read now, current one first.
+  static Future<List<Directory>> allBaseDirs() async {
+    final cur = await baseDir();
+    final out = [cur];
+    final others = <Directory>[
+      if (await hasAllFilesAccess()) Directory('/storage/emulated/0/BillTracker'),
+    ];
+    final ext = Platform.isAndroid ? await getExternalStorageDirectory() : null;
+    if (ext != null) others.add(Directory('${ext.path}/BillTracker'));
+    for (final d in others) {
+      try {
+        if (d.path != cur.path && await d.exists()) out.add(d);
+      } catch (_) {}
+    }
+    return out;
+  }
+
+  /// Forgets all data in memory (after logout wiped the disk).
+  void resetInMemory() {
+    data = AppData();
+    generation++;
+    notifyListeners();
+  }
+
   /// Copies a picked or shared file into Receipts/ or Statements/.
   Future<FileRef> storeFile(String srcPath, String srcName, Bill b, String key, String kind) async {
     final base = await baseDir();
