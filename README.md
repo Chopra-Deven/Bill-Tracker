@@ -1,6 +1,34 @@
 # Bill Tracker
 
-Flutter app (Android) that tracks credit card and utility bills across payment apps.
+A personal, offline Android app (Flutter) for tracking credit card and utility bills that you pay through different apps such as CRED, Paytm, PhonePe, Google Pay or your bank app.
+
+Each payment app only knows about the payments made inside it. Bill Tracker gives you one place to see what is due, what is paid, and where the proof is. It has no server, no account and no network use. All data stays on your phone.
+
+<p align="center">
+  <img src="docs/screenshots/home.png" width="230" alt="Home screen" />
+  <img src="docs/screenshots/bills.png" width="230" alt="Bills list" />
+  <img src="docs/screenshots/insights.png" width="230" alt="Insights" />
+</p>
+<p align="center">
+  <img src="docs/screenshots/reminders.png" width="230" alt="Reminders" />
+  <img src="docs/screenshots/bill_detail.png" width="230" alt="Bill detail and payment history" />
+  <img src="docs/screenshots/add_bill.png" width="230" alt="Add bill form" />
+</p>
+
+<sub>Screenshots use demo data.</sub>
+
+## Features
+
+- **All bills in one list.** Credit cards and utilities (electricity, broadband, mobile, water and so on), each with a monthly due date. Cards can also store a statement day and a credit limit.
+- **Reminders until you pay.** Daily reminders start N days before the due date and keep coming until that month is marked paid. Notifications have **Snooze** and **Mark paid** buttons, and you can enter the amount right in the notification.
+- **Receipt-gated mode.** You can set a bill so that reminders stop only after you attach a payment screenshot or PDF as proof.
+- **Share to Bill Tracker.** Share a payment screenshot or PDF from any app, pick the bill, and it is saved as that month's receipt.
+- **Files you can see.** Receipts and statements are saved as normal files in the `BillTracker` folder on the phone, sorted by bill and month.
+- **Payment history.** For each bill you can see the months paid, the total and average, and any late payments.
+- **Insights.** Charts for the last 1, 3, 6 or 12 months: the total spent, each bill's share, monthly bars for cards and utilities, card use against the 30% mark, and totals for each payment app.
+- **Home-screen widgets.** One shows the next 3 bills. The other shows how many bills are due this week and how many are overdue.
+- **App lock.** A 4-digit PIN with fingerprint unlock.
+- **Backup and export.** Make a zip backup by hand or on a daily, weekly or monthly schedule, export to CSV, and restore from a backup. You can share a backup to Google Drive.
 
 ## Setup on Ubuntu 24.04
 
@@ -22,8 +50,8 @@ flutter doctor --android-licenses   # type y for each
 flutter doctor                       # Android toolchain should show a tick
 
 # 4. Project
-unzip bill_tracker_source.zip
-cd bill_tracker
+git clone https://github.com/Chopra-Deven/Bill-Tracker.git
+cd Bill-Tracker
 chmod +x setup.sh
 ./setup.sh
 ```
@@ -58,3 +86,5 @@ The file is `build/app/outputs/flutter-apk/app-release.apk`. Install with `adb i
 - `lib/backup.dart` – zip backup, CSV export, restore
 - `lib/ui/` – screens
 - `android_overlay/` – manifest, MainActivity, widget providers (copied by setup.sh)
+
+See [APP_ANALYSIS.md](APP_ANALYSIS.md) for a detailed walkthrough of every feature and how data moves through the app.
