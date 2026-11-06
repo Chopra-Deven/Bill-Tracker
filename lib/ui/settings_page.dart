@@ -242,8 +242,11 @@ class _SettingsPageState extends State<SettingsPage> {
                               return;
                             }
                             await _run(() async {
-                              final n = await Backup.restoreZip(f);
-                              if (context.mounted) toast(context, 'Restored $n bills');
+                              final (n, skipped) = await Backup.restoreZip(f);
+                              if (context.mounted) {
+                                toast(context,
+                                    'Restored $n bills${skipped > 0 ? ', skipped $skipped unsafe file${skipped == 1 ? '' : 's'}' : ''}');
+                              }
                             });
                           },
                           child: const Text('Restore'),

@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 
 import 'logic.dart';
 import 'models.dart';
+import 'paths.dart';
 import 'store.dart';
 
 class Backup {
@@ -89,30 +90,43 @@ class Backup {
     return out;
   }
 
-  /// Restores a backup .zip. Returns the number of bills restored.
-  static Future<int> restoreZip(String path) async {
+  /// Restores a backup .zip. Returns the number of bills restored and the
+  /// number of files skipped because they pointed outside the BillTracker folder.
+  static Future<(int, int)> restoreZip(String path) async {
     final arch = ZipDecoder().decodeBytes(await File(path).readAsBytes());
     final j = arch.findFile('bills.json');
     if (j == null) throw const FormatException('This file is not a Bill Tracker backup.');
     final d = AppData.fromJson(jsonDecode(utf8.decode(j.content as List<int>)));
     final base = await AppStore.baseDir();
+    var skipped = 0;
     for (final f in arch.files) {
       if (!f.isFile || f.name == 'bills.json' || f.name == 'payments.csv') continue;
-      final out = File('${base.path}/${f.name}');
+      final target = safeJoin(base.path, f.name);
+      if (target == null) {
+        skipped++;
+        continue;
+      }
+      final out = File(target);
       await out.parent.create(recursive: true);
       await out.writeAsBytes(f.content as List<int>);
     }
+    FileRef? fix(FileRef? r) {
+      if (r == null) return null;
+      final target = safeJoin(base.path, rel(r.path));
+      if (target == null) return null;
+      return r..path = target;
+    }
+
     for (final b in d.bills) {
       for (final c in b.cycles.values) {
-        for (final r in [c.receipt, c.statement]) {
-          if (r != null) r.path = '${base.path}/${rel(r.path)}';
-        }
+        c.receipt = fix(c.receipt);
+        c.statement = fix(c.statement);
       }
     }
     // Keep this phone's lock and backup settings.
     d.settings = AppStore.I.settings;
     await AppStore.I.replaceAll(d);
-    return d.bills.length;
+    return (d.bills.length, skipped);
   }
 
   static Future<File?> autoIfDue() async {

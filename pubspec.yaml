@@ -22,6 +22,8 @@ dependencies:
   flutter_secure_storage: any
   archive: any
   share_plus: any
+  path: any
+  crypto: any
   workmanager: any
 
 dev_dependencies:
