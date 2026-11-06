@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root" android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:padding="14dp" android:background="@drawable/widget_bg">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal">
+        <TextView android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+            android:text="Bill Tracker · due next" android:textColor="#0E6B57" android:textSize="12sp" android:textStyle="bold"/>
+        <TextView android:id="@+id/updated" android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:textColor="#5B6863" android:textSize="11sp"/>
+    </LinearLayout>
+        <LinearLayout android:id="@+id/r0" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:paddingTop="5dp" android:paddingBottom="5dp">
+            <TextView android:id="@+id/r0_name" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                android:textColor="#14201C" android:textSize="14sp" android:textStyle="bold" android:maxLines="1" android:ellipsize="end"/>
+            <TextView android:id="@+id/r0_due" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:layout_marginStart="8dp" android:textColor="#5B6863" android:textSize="12sp" android:maxLines="1"/>
+        </LinearLayout>
+        <LinearLayout android:id="@+id/r1" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:paddingTop="5dp" android:paddingBottom="5dp">
+            <TextView android:id="@+id/r1_name" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                android:textColor="#14201C" android:textSize="14sp" android:textStyle="bold" android:maxLines="1" android:ellipsize="end"/>
+            <TextView android:id="@+id/r1_due" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:layout_marginStart="8dp" android:textColor="#5B6863" android:textSize="12sp" android:maxLines="1"/>
+        </LinearLayout>
+        <LinearLayout android:id="@+id/r2" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:paddingTop="5dp" android:paddingBottom="5dp">
+            <TextView android:id="@+id/r2_name" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+                android:textColor="#14201C" android:textSize="14sp" android:textStyle="bold" android:maxLines="1" android:ellipsize="end"/>
+            <TextView android:id="@+id/r2_due" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:layout_marginStart="8dp" android:textColor="#5B6863" android:textSize="12sp" android:maxLines="1"/>
+        </LinearLayout>
+</LinearLayout>

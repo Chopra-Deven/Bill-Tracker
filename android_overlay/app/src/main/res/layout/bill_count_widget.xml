@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root" android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:padding="14dp" android:background="@drawable/widget_bg">
+    <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:text="Due in 7 days" android:textColor="#5B6863" android:textSize="12sp" android:textStyle="bold"/>
+    <TextView android:id="@+id/count" android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:textColor="#14201C" android:textSize="34sp" android:textStyle="bold"/>
+    <TextView android:id="@+id/over" android:layout_width="wrap_content" android:layout_height="wrap_content"
+        android:textColor="#B93A26" android:textSize="12sp" android:textStyle="bold"/>
+</LinearLayout>

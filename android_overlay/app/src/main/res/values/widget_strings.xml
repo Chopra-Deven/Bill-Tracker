@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_list_desc">Your next three bills and their due dates</string>
+    <string name="widget_count_desc">How many bills are due in the next 7 days</string>
+</resources>
