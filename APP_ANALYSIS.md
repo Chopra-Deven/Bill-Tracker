@@ -16,7 +16,7 @@ The problem it solves: each payment app only knows about the payments made insid
 4. Stores receipts and statements as plain files in a `BillTracker` folder on the phone.
 5. Shows spending insights (monthly totals, share per bill, card utilization, which apps were used).
 
-There is no server, no account and no network use. All data stays on the phone, with zip backups that you can share to Google Drive by hand.
+There is no server of ours. Users sign in with Google, and their data is kept on the phone and in the hidden app folder of their own Google Drive, so it comes back after a reinstall or on a new phone (see `docs/superpowers/specs/2026-11-06-user-login-drive-sync-design.md`). Zip backups can still be made and shared by hand.
 
 ---
 
@@ -49,9 +49,11 @@ There is no server, no account and no network use. All data stays on the phone, 
 | `local_auth`, `flutter_secure_storage` | Fingerprint unlock and PIN storage |
 | `archive` | Zip backup and restore |
 | `share_plus` | Sharing a backup or CSV (for example to Drive) |
+| `google_sign_in`, `http` | Google sign-in and Drive v3 REST calls for sync (`lib/sync/`) |
 
 ### 2.3 Android permissions (`AndroidManifest.xml`)
 
+- `INTERNET`: Google sign-in and Drive sync
 - `POST_NOTIFICATIONS`, `SCHEDULE_EXACT_ALARM`, `RECEIVE_BOOT_COMPLETED`, `VIBRATE`: reminders, including after a reboot
 - `USE_BIOMETRIC`: fingerprint unlock
 - `MANAGE_EXTERNAL_STORAGE`, plus legacy `READ_`/`WRITE_EXTERNAL_STORAGE`: saving to `/storage/emulated/0/BillTracker`
@@ -81,7 +83,7 @@ There is no server, no account and no network use. All data stays on the phone, 
 
 ### 2.5 Non-functional characteristics
 
-- **Offline and private.** No network calls. Data is a single JSON file in the app documents dir (`billtracker.json`).
+- **Offline first and private.** Data is a single JSON file in the app documents dir (`billtracker.json`), and everything works offline after the first sign-in. The only network use is Google sign-in and the user's own Drive app folder.
 - **Safe writes.** Data is written to `.tmp` and then renamed, so the file is replaced in one step.
 - **Locale.** Indian number format (`₹1,78,287`, `₹1.5L`). The timezone prefers `Asia/Kolkata` when the device offset matches it.
 - **Testability.** Date and cycle logic is kept in `logic.dart` with no Flutter imports, and is unit tested in `test/`, along with the pure `paths.dart` (safe restore) and `pin_policy.dart` (PIN hashing and lockout).
@@ -335,6 +337,7 @@ Phone
 | Bills, monthly payment records, app settings | `billtracker.json` in the app documents dir (`getApplicationDocumentsDirectory`) | No | Yes |
 | PIN (salted hash) and lockout state | `flutter_secure_storage` (Android Keystore) | No | Yes |
 | Scheduled reminders, widget values | Plugin storage, rebuilt from the JSON on every save and by the daily job | No | Yes |
+| Synced copy: data file (relative paths, no per-phone settings) and every file in Receipts/ and Statements/ | The user's Google Drive, hidden `appDataFolder` | No (only this app can read it) | **No**: it comes back on sign-in |
 | Receipts, statements, backups, with **All files access** | `/storage/emulated/0/BillTracker` | Yes | **No** |
 | Receipts, statements, backups, **without** All files access | `/storage/emulated/0/Android/data/com.deven.billtracker/files/BillTracker` | Hard to reach on Android 11+ | **Yes** |
 

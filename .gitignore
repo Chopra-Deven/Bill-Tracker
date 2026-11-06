@@ -49,3 +49,6 @@ app.*.map.json
 
 # Kotlin compiler session files
 /android/.kotlin/
+
+# Google sign-in client ID for --dart-define-from-file
+google.json

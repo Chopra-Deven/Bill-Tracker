@@ -77,6 +77,14 @@ The file is `build/app/outputs/flutter-apk/app-release.apk`. Install with `adb i
 - Settings > Storage > "Allow all files access" in the app, so files go to the BillTracker folder in main storage.
 - Battery: set Bill Tracker to "Unrestricted" so reminders are not delayed. A daily background job re-plans reminders, refreshes the widgets and runs the auto-backup even when the app is not opened; battery restrictions can stop it.
 
+## Google sign-in
+
+The app requires Google sign-in and syncs to the user's own Drive. One-time setup and the build flag are in [docs/GOOGLE_SIGN_IN_SETUP.md](docs/GOOGLE_SIGN_IN_SETUP.md):
+
+```bash
+flutter run --dart-define=GOOGLE_SERVER_CLIENT_ID=<web client id>
+```
+
 ## Project layout
 
 - `lib/models.dart`, `lib/logic.dart` – data and monthly cycle rules (unit tested in `test/`)
@@ -84,6 +92,7 @@ The file is `build/app/outputs/flutter-apk/app-release.apk`. Install with `adb i
 - `lib/notifications.dart` – reminders and notification buttons
 - `lib/widget_sync.dart` – home-screen widgets
 - `lib/backup.dart` – zip backup, CSV export, restore
+- `lib/sync/` – Google sign-in, Drive sync engine and REST client (unit tested with a fake Drive)
 - `lib/ui/` – screens
 - `android_overlay/` – manifest, MainActivity, widget providers (copied by setup.sh)
 
