@@ -23,6 +23,8 @@ s = p.read_text()
 s = re.sub(r'namespace = "[^"]+"', 'namespace = "com.deven.billtracker"', s)
 s = re.sub(r'applicationId = "[^"]+"', 'applicationId = "com.deven.billtracker"', s)
 s = re.sub(r'minSdk = [^\n]+', 'minSdk = 24', s)
+# Plugins (flutter_local_notifications, permission_handler, ...) need API 37.
+s = re.sub(r'compileSdk = [^\n]+', 'compileSdk = 37', s)
 if "isCoreLibraryDesugaringEnabled" not in s:
     s = s.replace("compileOptions {", "compileOptions {\n        isCoreLibraryDesugaringEnabled = true", 1)
 if "desugar_jdk_libs" not in s:
