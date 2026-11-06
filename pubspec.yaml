@@ -24,6 +24,8 @@ dependencies:
   share_plus: any
   path: any
   crypto: any
+  google_sign_in: ^7.2.0
+  http: any
   workmanager: any
 
 dev_dependencies:
