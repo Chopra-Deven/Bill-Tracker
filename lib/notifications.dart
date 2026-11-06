@@ -113,29 +113,32 @@ class Notifs {
         importance: Importance.defaultImportance),
   );
 
-  static String _body(Bill b, String key, DateTime due) =>
+  static String _body(Bill b, String key, DateTime due, {int alsoUnpaid = 0}) =>
       '${monthName(key)} bill, due ${niceDate(due)}. '
+      '${alsoUnpaid > 0 ? '+$alsoUnpaid more unpaid month${alsoUnpaid == 1 ? '' : 's'}. ' : ''}'
       '${b.rem.requireReceipt ? 'Upload the receipt to stop this reminder.' : 'Mark it paid to stop this reminder.'}';
 
   /// Cancels everything and schedules reminders for every unpaid bill month.
   static Future<void> rescheduleAll(AppData d) async {
     if (!_inited) await init();
-    await plugin.cancelAll();
+    // Pending only: reminders already in the notification shade stay there.
+    await plugin.cancelAllPendingNotifications();
     final now = DateTime.now();
     final exact = await _android?.canScheduleExactNotifications() ?? false;
     final mode = exact ? AndroidScheduleMode.exactAllowWhileIdle : AndroidScheduleMode.inexactAllowWhileIdle;
     for (final r in planReminders(d.bills, now)) {
-      await _schedule(r.id, r.bill, r.cycle.key, r.cycle.due, r.at, mode);
+      await _schedule(r.id, r.bill, r.cycle.key, r.cycle.due, r.at, mode, alsoUnpaid: r.alsoUnpaid);
     }
   }
 
-  static Future<void> _schedule(int id, Bill b, String key, DateTime due, DateTime at, AndroidScheduleMode mode) async {
+  static Future<void> _schedule(int id, Bill b, String key, DateTime due, DateTime at, AndroidScheduleMode mode,
+      {int alsoUnpaid = 0}) async {
     final days = diffDays(due, dateOnly(at));
     try {
       await plugin.zonedSchedule(
         id: id,
         title: remTitle(b, days),
-        body: _body(b, key, due),
+        body: _body(b, key, due, alsoUnpaid: alsoUnpaid),
         scheduledDate: tz.TZDateTime.from(at, tz.local),
         notificationDetails: _details(b),
         androidScheduleMode: mode,

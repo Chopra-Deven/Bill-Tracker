@@ -136,8 +136,7 @@ class Backup {
     final now = DateTime.now().millisecondsSinceEpoch;
     if (now - s.lastBackup < days * 86400000) return null;
     final f = await makeZip(AppStore.I.data, files: s.backupFiles);
-    s.lastBackup = now;
-    await AppStore.I.save(sideEffects: false);
+    await AppStore.I.saveLastBackup(now);
     return f;
   }
 }

@@ -66,7 +66,7 @@ There is no server, no account and no network use. All data stays on the phone, 
 | FR-2 | Each bill repeats monthly on a fixed due day. Day 29–31 is clamped to the last day of shorter months. |
 | FR-3 | A card can store a statement day and a credit limit. |
 | FR-4 | Each bill has its own reminder settings: on/off, days before, time of day, snooze length, maximum snoozes, and "require receipt". |
-| FR-5 | Reminders fire daily from `due − before` days until the month is paid, for every unpaid month from 3 months back to next month. They are planned 14 days ahead and re-planned daily by a background job. |
+| FR-5 | Reminders fire daily from `due − before` days until the month is paid, for every unpaid month from 3 months back to next month. At most one reminder per bill per day, for the oldest unpaid month ("+N more unpaid months" in the text). They are planned 40 days ahead and re-planned daily by a background job. |
 | FR-6 | A notification offers **Snooze** and either **Upload receipt** (receipt-gated) or **Mark paid** with an inline amount input. |
 | FR-7 | A payment records amount, paid-on date, paid-via app, an optional (or required) receipt and an optional statement. |
 | FR-8 | When reminders are on and receipt-gated, a payment cannot be saved without a receipt. |
@@ -229,7 +229,7 @@ Months older than 3 months are not checked. Editing the due date moves `startKey
   - **Upload receipt** opens the app on the Mark paid page.
   - **Mark paid** has an inline amount field and saves in the background with today's date and the bill's usual app. It then shows a "marked paid" confirmation. An invalid amount shows "Payment not saved".
 - Tapping the notification body opens Mark paid, or Bill details if the month is already paid.
-- Planning is done by the pure `planReminders()` in `logic.dart`. It covers the next 14 days and is re-run on every save, at app start, and once a day by a WorkManager job (`lib/background.dart`), which also refreshes the widgets and runs the auto-backup.
+- Planning is done by the pure `planReminders()` in `logic.dart`. It gives each bill at most one reminder a day, for its oldest unpaid month (the text adds "+N more unpaid months"), covers the next 40 days, and is re-run on every save, at app start, and once a day by a WorkManager job (`lib/background.dart`), which also refreshes the widgets and runs the auto-backup.
 - Notification id scheme: `nid*10000 + slot*100 + dayIndex` for daily reminders, `nid*10000 + 9000 + slot` for snooze wake-ups, and `nid*10000 + 9990–9998` for test and info messages. At most 400 are scheduled, keeping the earliest.
 
 ### 5.10 Home-screen widgets
@@ -254,7 +254,7 @@ Months older than 3 months are not checked. Editing the due date moves `startKey
 
 1. **Add the bill (one time).** The user taps **+**, picks *Credit card*, enters "HDFC Regalia", first due date **8 Nov 2026**, statement day 18, limit ₹3,00,000, usually paid via *CRED*. Reminders: 5 days before at 09:00, snooze 1 hr × 3, *require receipt* ✔.
    - The app saves the bill with `startKey = 2026-11`, `nid = n`, and requests notification and exact-alarm permission.
-   - `save()` triggers `rescheduleAll()`, which schedules daily 09:00 notifications from **3 Nov**, 14 days ahead at a time, until November is paid. The widgets refresh.
+   - `save()` triggers `rescheduleAll()`, which schedules daily 09:00 notifications from **3 Nov**, 40 days ahead at a time, until November is paid. The widgets refresh.
 2. **Reminder fires.** On 3 Nov at 09:00 the phone shows *"HDFC Regalia is due in 5 days. November bill, due 8 Nov. Upload the receipt to stop this reminder."* with **Snooze 1 hr** and **Upload receipt**.
 3. **User snoozes (optional).** Tapping **Snooze 1 hr** runs in the background: `snoozes = 1`, `snoozedUntil = now + 60 min`. The app reschedules everything, adds a one-off wake-up at the snooze time, and skips daily slots before it.
 4. **User pays in CRED.** This happens outside Bill Tracker. CRED shows a success screen and the user takes a screenshot.
@@ -323,7 +323,7 @@ These come from reading the code. The Status column shows what the fix branch `f
 
 | # | Area | Observation | Status |
 |---|---|---|---|
-| 1 | Reminders | Notifications are only re-planned when the app saves data or starts. If the app is not opened for about 6 weeks, the scheduled window runs out (last/this/next month, up to due + 14 days) and reminders stop coming. A periodic background job (WorkManager) would fix this. | Fixed: daily WorkManager re-plan, rolling 14-day horizon |
+| 1 | Reminders | Notifications are only re-planned when the app saves data or starts. If the app is not opened for about 6 weeks, the scheduled window runs out (last/this/next month, up to due + 14 days) and reminders stop coming. A periodic background job (WorkManager) would fix this. | Fixed: daily WorkManager re-plan, rolling 40-day horizon |
 | 2 | Cycle logic | `active()` and `openCycles()` look back only **one** month. A bill unpaid for 2 or more months back drops out of "attention" and reminders. It is only visible in the history as "Not marked paid". | Fixed: 3-month lookback, oldest unpaid month first |
 | 3 | Edit bill | Changing the due date updates only `dueDay`. `startKey` is never changed, so moving the first month earlier or later on edit has no effect. | Fixed: `newStartKey` on date change |
 | 4 | Restore security | `restoreZip` writes `${base}/${f.name}` straight from the zip entry names. A crafted zip with `../` entries could write outside the folder (zip-slip). Normalise the path and reject entries that leave the folder. | Fixed: `safeJoin` rejects unsafe entries |
@@ -333,7 +333,7 @@ These come from reading the code. The Status column shows what the fix branch `f
 | 8 | Notification cap | Capped at 400 scheduled reminders. With many bills and long windows, later ones are silently skipped. | Fixed: earliest 400 kept, daily re-plan schedules the rest |
 | 9 | Platform | Android only. The storage paths (`/storage/emulated/0`) and the widgets are Android-specific. iOS would need separate work. | Out of scope |
 | 10 | Auto-backup | Runs only at app start, never in the background, and saves locally. It reaches Drive only through a manual share. | Partly fixed: auto-backup runs in the background; Drive upload is still a manual share |
-| 11 | Tests | Unit tests cover `logic.dart` and the JSON round-trip only. There are no widget or integration tests for notifications, files or backup. | Improved: 29 unit tests (was 8) |
+| 11 | Tests | Unit tests cover `logic.dart` and the JSON round-trip only. There are no widget or integration tests for notifications, files or backup. | Improved: 32 unit tests (was 8) |
 
 ---
 

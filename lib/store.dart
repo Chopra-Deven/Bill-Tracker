@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
@@ -57,9 +58,7 @@ class AppStore extends ChangeNotifier {
     } catch (e) {
       debugPrint('read before save failed: $e');
     }
-    final tmp = File('${f.path}.tmp');
-    await tmp.writeAsString(jsonEncode(data.toJson()));
-    await tmp.rename(f.path);
+    await _writeAtomic(f, jsonEncode(data.toJson()));
     notifyListeners();
     if (sideEffects && onChanged != null) {
       try {
@@ -68,6 +67,23 @@ class AppStore extends ChangeNotifier {
         debugPrint('onChanged failed: $e');
       }
     }
+  }
+
+  /// Writes through a temp file unique to this isolate, then renames, so the
+  /// app and the background job never share a half-written temp file.
+  static Future<void> _writeAtomic(File f, String text) async {
+    final tmp = File('${f.path}.${Isolate.current.hashCode}.${DateTime.now().microsecondsSinceEpoch}.tmp');
+    await tmp.writeAsString(text);
+    await tmp.rename(f.path);
+  }
+
+  /// Records a finished backup by changing only `lastBackup` in the saved
+  /// file, so payments saved meanwhile by the app are kept.
+  Future<void> saveLastBackup(int ms) async {
+    data.settings.lastBackup = ms;
+    final f = await _dataFile();
+    if (!await f.exists()) return save(sideEffects: false);
+    await _writeAtomic(f, jsonEncode(patchLastBackup(jsonDecode(await f.readAsString()), ms)));
   }
 
   // ---------- files ----------

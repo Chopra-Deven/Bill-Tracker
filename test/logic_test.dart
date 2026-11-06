@@ -74,7 +74,7 @@ void main() {
   test('planner keeps reminding overdue month past due+14', () {
     final b = bill(due: 1, start: '2026-10');
     final now = DateTime(2026, 11, 20, 8);
-    final p = planReminders([b], now).where((r) => r.cycle.key == '2026-10').toList();
+    final p = planReminders([b], now, horizonDays: 14).where((r) => r.cycle.key == '2026-10').toList();
     expect(p.first.at, DateTime(2026, 11, 20, 9));
     expect(p.length, 15);
   });
@@ -146,6 +146,28 @@ void main() {
       ..cycles['2026-10'] = Cycle(paid: true, receipt: FileRef('a', '/x/a.jpg'), statement: FileRef('s', '/x/s.pdf'))
       ..cycles['2026-11'] = Cycle(paid: true, receipt: FileRef('a', '/x/a.jpg'));
     expect(billFilePaths(b)..sort(), ['/x/a.jpg', '/x/s.pdf']);
+  });
+
+  test('planner sends one reminder per bill per day for the oldest unpaid month', () {
+    final b = bill(due: 8, start: '2026-06');
+    final p = planReminders([b], DateTime(2026, 11, 6, 8));
+    final today = p.where((r) => r.at == DateTime(2026, 11, 6, 9)).toList();
+    expect(today.length, 1);
+    expect(today.single.cycle.key, '2026-08');
+    expect(today.single.alsoUnpaid, 3);
+  });
+
+  test('planner default horizon covers about 6 weeks', () {
+    final b = bill(due: 8, start: '2026-11');
+    final p = planReminders([b], DateTime(2026, 11, 6, 8));
+    expect(p.last.at, DateTime(2026, 12, 16, 9));
+  });
+
+  test('patchLastBackup changes only lastBackup', () {
+    final disk = AppData(bills: [bill()..cycles['2026-11'] = Cycle(paid: true, amount: 50)]).toJson();
+    final out = AppData.fromJson(patchLastBackup(disk, 777));
+    expect(out.settings.lastBackup, 777);
+    expect(out.bills.single.cycles['2026-11']!.amount, 50);
   });
 
   test('indian money format', () {

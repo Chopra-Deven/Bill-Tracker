@@ -94,32 +94,39 @@ class PlannedReminder {
   final ActiveCycle cycle;
   final DateTime at;
   final bool isSnooze;
-  PlannedReminder(this.id, this.bill, this.cycle, this.at, {this.isSnooze = false});
+
+  /// Other unpaid months of the same bill whose reminders have also started.
+  final int alsoUnpaid;
+  PlannedReminder(this.id, this.bill, this.cycle, this.at, {this.isSnooze = false, this.alsoUnpaid = 0});
 }
 
-/// Every reminder to schedule from [now]: daily at the bill's time, from
-/// `due - before` days until the month is paid, limited to the next
-/// [horizonDays] days, plus one wake-up per active snooze. Sorted by time and
-/// cut to the [cap] earliest.
-List<PlannedReminder> planReminders(List<Bill> bills, DateTime now, {int cap = 400, int horizonDays = 14}) {
+/// Every reminder to schedule from [now]. Each bill gets at most one reminder
+/// a day, at its set time, for its oldest unpaid month whose reminders have
+/// started (`due - before` days), until that month is paid. A snoozed month
+/// silences the bill until the snooze ends, then gets one wake-up. Covers the
+/// next [horizonDays] days, sorted by time and cut to the [cap] earliest.
+List<PlannedReminder> planReminders(List<Bill> bills, DateTime now, {int cap = 400, int horizonDays = 40}) {
   final today = dateOnly(now);
   final out = <PlannedReminder>[];
   for (final b in bills) {
     if (!b.rem.on) continue;
     final open = openCycles(b, today);
+    for (var d = 0; d <= horizonDays; d++) {
+      final day = DateTime(today.year, today.month, today.day + d);
+      final at = DateTime(day.year, day.month, day.day, b.rem.hour, b.rem.minute);
+      if (!at.isAfter(now)) continue;
+      final started = [
+        for (var s = 0; s < open.length; s++)
+          if (!open[s].c.dismissed && !day.isBefore(open[s].due.subtract(Duration(days: b.rem.before)))) s
+      ];
+      if (started.isEmpty) continue;
+      final s = started.first;
+      if (at.millisecondsSinceEpoch <= open[s].c.snoozedUntil) continue;
+      out.add(PlannedReminder(notifId(b.nid, s, d), b, open[s], at, alsoUnpaid: started.length - 1));
+    }
     for (var s = 0; s < open.length; s++) {
       final a = open[s];
-      if (a.c.dismissed) continue;
-      final start = a.due.subtract(Duration(days: b.rem.before));
-      for (var d = 0; d <= horizonDays; d++) {
-        final day = DateTime(today.year, today.month, today.day + d);
-        if (day.isBefore(start)) continue;
-        final at = DateTime(day.year, day.month, day.day, b.rem.hour, b.rem.minute);
-        if (!at.isAfter(now)) continue;
-        if (at.millisecondsSinceEpoch < a.c.snoozedUntil) continue;
-        out.add(PlannedReminder(notifId(b.nid, s, d), b, a, at));
-      }
-      if (a.c.snoozedUntil > now.millisecondsSinceEpoch) {
+      if (!a.c.dismissed && a.c.snoozedUntil > now.millisecondsSinceEpoch) {
         out.add(PlannedReminder(snoozeId(b.nid, s), b, a, DateTime.fromMillisecondsSinceEpoch(a.c.snoozedUntil),
             isSnooze: true));
       }
@@ -270,3 +277,11 @@ List<String> billFilePaths(Bill b) => {
         for (final f in [c.receipt, c.statement])
           if (f != null) f.path,
     }.toList();
+
+/// Returns the saved JSON with only `settings.lastBackup` changed, so a
+/// background backup never overwrites payments saved in the meantime.
+Map<String, dynamic> patchLastBackup(Map<String, dynamic> diskJson, int ms) {
+  final settings = Map<String, dynamic>.from((diskJson['settings'] as Map?) ?? {});
+  settings['lastBackup'] = ms;
+  return {...diskJson, 'settings': settings};
+}
