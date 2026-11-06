@@ -119,6 +119,21 @@ void main() {
     expect(mem.settings.lastBackup, 500);
   });
 
+  test('newStartKey moves start earlier', () {
+    final b = bill(start: '2026-11');
+    expect(newStartKey(b, DateTime(2026, 9, 8)), '2026-09');
+  });
+
+  test('newStartKey moves start later when nothing paid before', () {
+    final b = bill(start: '2026-08');
+    expect(newStartKey(b, DateTime(2026, 11, 8)), '2026-11');
+  });
+
+  test('newStartKey never hides a paid month', () {
+    final b = bill(start: '2026-08')..cycles['2026-09'] = Cycle(paid: true);
+    expect(newStartKey(b, DateTime(2026, 11, 8)), '2026-09');
+  });
+
   test('indian money format', () {
     expect(money(178287), '₹1,78,287');
     expect(money(899), '₹899');

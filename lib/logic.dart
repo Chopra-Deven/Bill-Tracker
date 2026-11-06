@@ -248,3 +248,11 @@ void keepNewerBackup(AppData mem, Map<String, dynamic> diskJson) {
   final disk = (diskJson['settings'] as Map?)?['lastBackup'];
   if (disk is num && disk.toInt() > mem.settings.lastBackup) mem.settings.lastBackup = disk.toInt();
 }
+
+/// The first bill month after the user picks a new due date while editing:
+/// the picked month, unless a paid month comes before it (history stays visible).
+String newStartKey(Bill b, DateTime picked) {
+  final k = keyOf(picked);
+  final paid = b.cycles.entries.where((e) => e.value.paid).map((e) => e.key).toList()..sort();
+  return paid.isNotEmpty && paid.first.compareTo(k) < 0 ? paid.first : k;
+}

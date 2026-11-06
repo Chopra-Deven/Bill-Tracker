@@ -21,6 +21,7 @@ class _BillFormPageState extends State<BillFormPage> {
   DateTime? due;
   late ReminderCfg rem;
   bool saving = false;
+  bool dateChanged = false;
 
   bool get editing => widget.bill != null;
 
@@ -64,6 +65,7 @@ class _BillFormPageState extends State<BillFormPage> {
         ..limit = isCard && lim != null && lim > 0 ? lim : null
         ..via = via?.text.trim() ?? b.via
         ..rem = rem;
+      if (dateChanged) b.startKey = newStartKey(b, due!);
       await AppStore.I.updateBill();
       if (mounted) {
         toast(context, 'Bill updated');
@@ -135,7 +137,12 @@ class _BillFormPageState extends State<BillFormPage> {
                     firstDate: DateTime(now.year - 1, now.month),
                     lastDate: DateTime(now.year + 1, now.month, 28),
                   );
-                  if (d != null) setState(() => due = d);
+                  if (d != null) {
+                    setState(() {
+                      due = d;
+                      dateChanged = true;
+                    });
+                  }
                 },
                 child: InputDecorator(
                   decoration: InputDecoration(labelText: editing ? 'Due date' : 'First due date'),
