@@ -66,7 +66,7 @@ There is no server, no account and no network use. All data stays on the phone, 
 | FR-2 | Each bill repeats monthly on a fixed due day. Day 29–31 is clamped to the last day of shorter months. |
 | FR-3 | A card can store a statement day and a credit limit. |
 | FR-4 | Each bill has its own reminder settings: on/off, days before, time of day, snooze length, maximum snoozes, and "require receipt". |
-| FR-5 | Reminders fire daily from `due − before` days until 14 days after the due date, for every unpaid month in the window (last, this and next month). |
+| FR-5 | Reminders fire daily from `due − before` days until the month is paid, for every unpaid month from 3 months back to next month. They are planned 14 days ahead and re-planned daily by a background job. |
 | FR-6 | A notification offers **Snooze** and either **Upload receipt** (receipt-gated) or **Mark paid** with an inline amount input. |
 | FR-7 | A payment records amount, paid-on date, paid-via app, an optional (or required) receipt and an optional statement. |
 | FR-8 | When reminders are on and receipt-gated, a payment cannot be saved without a receipt. |
@@ -84,7 +84,7 @@ There is no server, no account and no network use. All data stays on the phone, 
 - **Offline and private.** No network calls. Data is a single JSON file in the app documents dir (`billtracker.json`).
 - **Safe writes.** Data is written to `.tmp` and then renamed, so the file is replaced in one step.
 - **Locale.** Indian number format (`₹1,78,287`, `₹1.5L`). The timezone prefers `Asia/Kolkata` when the device offset matches it.
-- **Testability.** Date and cycle logic is kept in `logic.dart` with no Flutter imports, and is unit tested in `test/logic_test.dart`.
+- **Testability.** Date and cycle logic is kept in `logic.dart` with no Flutter imports, and is unit tested in `test/`, along with the pure `paths.dart` (safe restore) and `pin_policy.dart` (PIN hashing and lockout).
 - **Theming.** Material 3 light and dark themes with a green accent (`#0E6B57`).
 
 ---
@@ -147,9 +147,10 @@ A **cycle** is one bill-month. A cycle exists in the map only after something ha
 **Due date.** `dueFor(bill, month)` gives `dueDay` in that month, clamped to the month's length.
 
 **Active cycle**, the month that needs attention:
-1. last month, if it is on or after `startKey` and unpaid; otherwise
-2. this month, if it is on or after `startKey` and unpaid; otherwise
-3. next month (or `startKey`, if that is still in the future).
+1. the **oldest** unpaid month from 3 months back (`lookbackMonths`) up to this month, counting only months on or after `startKey`; otherwise
+2. next month (or `startKey`, if that is still in the future).
+
+Months older than 3 months are not checked. Editing the due date moves `startKey` to the picked month, but never past a paid month (`newStartKey`).
 
 **Due state** of that cycle:
 
@@ -194,7 +195,7 @@ A **cycle** is one bill-month. A cycle exists in the map only after something ha
 - Payment history: months paid / months since start, total, average; the last 6 months, expandable to 120.
   - Unpaid month: "Not marked paid" (red when past due) and a **Mark paid** button.
   - Paid month: receipt thumbnail, amount, date, app, "Nd late" tag, and Receipt/Statement tags. Tapping it opens a **payment sheet** with the details, Open or Attach for each file, and **Remove payment**, which sets the month back to unpaid so reminders start again.
-- Edit and Delete. Deleting keeps the files on disk.
+- Edit and Delete. The delete dialog has an optional checkbox to also delete the bill's receipt and statement files.
 
 ### 5.5 Mark paid (PayPage)
 - Amount (hint: "Last time ₹X"), paid-on date (up to today), paid via (autocomplete), receipt and statement drop zones (image or PDF).
@@ -228,11 +229,12 @@ A **cycle** is one bill-month. A cycle exists in the map only after something ha
   - **Upload receipt** opens the app on the Mark paid page.
   - **Mark paid** has an inline amount field and saves in the background with today's date and the bill's usual app. It then shows a "marked paid" confirmation. An invalid amount shows "Payment not saved".
 - Tapping the notification body opens Mark paid, or Bill details if the month is already paid.
-- Notification id scheme: `nid*1000 + slot*100 + dayIndex` for daily reminders, `+900+slot` for snooze wake-ups, and 990–998 for test and info messages. The total is capped at 400 scheduled notifications.
+- Planning is done by the pure `planReminders()` in `logic.dart`. It covers the next 14 days and is re-run on every save, at app start, and once a day by a WorkManager job (`lib/background.dart`), which also refreshes the widgets and runs the auto-backup.
+- Notification id scheme: `nid*10000 + slot*100 + dayIndex` for daily reminders, `nid*10000 + 9000 + slot` for snooze wake-ups, and `nid*10000 + 9990–9998` for test and info messages. At most 400 are scheduled, keeping the earliest.
 
 ### 5.10 Home-screen widgets
 - **Bills due next**: up to 3 bills with "Due 8 Nov" or a red "Overdue · 3 Nov", and an "as of" date.
-- **Bills this week**: the count with `days ≤ 7`, and "N overdue" or "none overdue".
+- **Bills this week**: the count due between today and 7 days from now (overdue bills are not included), and "N overdue" or "none overdue".
 - Tapping either widget opens the app.
 
 ---
@@ -252,7 +254,7 @@ A **cycle** is one bill-month. A cycle exists in the map only after something ha
 
 1. **Add the bill (one time).** The user taps **+**, picks *Credit card*, enters "HDFC Regalia", first due date **8 Nov 2026**, statement day 18, limit ₹3,00,000, usually paid via *CRED*. Reminders: 5 days before at 09:00, snooze 1 hr × 3, *require receipt* ✔.
    - The app saves the bill with `startKey = 2026-11`, `nid = n`, and requests notification and exact-alarm permission.
-   - `save()` triggers `rescheduleAll()`, which schedules daily 09:00 notifications from **3 Nov to 22 Nov**. The widgets refresh.
+   - `save()` triggers `rescheduleAll()`, which schedules daily 09:00 notifications from **3 Nov**, 14 days ahead at a time, until November is paid. The widgets refresh.
 2. **Reminder fires.** On 3 Nov at 09:00 the phone shows *"HDFC Regalia is due in 5 days. November bill, due 8 Nov. Upload the receipt to stop this reminder."* with **Snooze 1 hr** and **Upload receipt**.
 3. **User snoozes (optional).** Tapping **Snooze 1 hr** runs in the background: `snoozes = 1`, `snoozedUntil = now + 60 min`. The app reschedules everything, adds a one-off wake-up at the snooze time, and skips daily slots before it.
 4. **User pays in CRED.** This happens outside Bill Tracker. CRED shows a success screen and the user takes a screenshot.
@@ -273,7 +275,7 @@ A **cycle** is one bill-month. A cycle exists in the map only after something ha
 | A2 | Bill is **not** receipt-gated | The notification shows **Mark paid** with an amount input. Typing "24580" saves the payment in the background; no app launch and no receipt. |
 | A3 | Not receipt-gated, user doesn't want reminders this month | Reminders tab, **Stop for Nov** sets `dismissed = true` and that month's notifications stop. |
 | A4 | Snooze limit reached | The Snooze button is disabled in the app. From the notification, a "No snoozes left" message appears and reminders continue. |
-| A5 | User pays late (after 8 Nov) | The status becomes *Overdue Nd*, reminders continue daily up to 14 days after the due date, and history shows "Nd late". |
+| A5 | User pays late (after 8 Nov) | The status becomes *Overdue Nd*, reminders continue daily until it is paid, and history shows "Nd late". |
 | A6 | Wrong payment recorded | Bill details, tap the month, **Remove payment**. The month becomes unpaid and its reminders are rescheduled. |
 | A7 | No receipt when one is required | PayPage blocks the save with "Upload the receipt. This bill keeps reminding you until a receipt is saved." and highlights the receipt box in red. |
 | A8 | App locked | `LockGate` shows the PIN pad and tries fingerprint first. Going out on purpose to a file picker, share menu or file viewer is wrapped in `LockService.outside()`, so coming back does not lock again. |
@@ -311,27 +313,27 @@ flowchart TD
 
 **Backup**: zip of `bills.json`, `payments.csv` and the files under their relative paths, saved to `BillTracker/Backups/BillTracker_backup_<date>_<hhmm>.zip`. Only the 5 newest are kept.
 
-**Restore**: read `bills.json`, write the files under the base folder, rewrite each file path to this phone's folder, keep this phone's settings, and replace all data.
+**Restore**: read `bills.json`, write the files under the base folder (entries that would land outside it are skipped and counted), rewrite each file path to this phone's folder, keep this phone's settings, and replace all data.
 
 ---
 
 ## 8. Observations, limitations and risks
 
-These come from reading the code. They are worth knowing before you change or extend the app.
+These come from reading the code. The Status column shows what the fix branch `fix/known-issues` changed (plan: `docs/superpowers/plans/2026-11-06-fix-known-issues.md`).
 
-| # | Area | Observation |
-|---|---|---|
-| 1 | Reminders | Notifications are only re-planned when the app saves data or starts. If the app is not opened for about 6 weeks, the scheduled window runs out (last/this/next month, up to due + 14 days) and reminders stop coming. A periodic background job (WorkManager) would fix this. |
-| 2 | Cycle logic | `active()` and `openCycles()` look back only **one** month. A bill unpaid for 2 or more months back drops out of "attention" and reminders. It is only visible in the history as "Not marked paid". |
-| 3 | Edit bill | Changing the due date updates only `dueDay`. `startKey` is never changed, so moving the first month earlier or later on edit has no effect. |
-| 4 | Restore security | `restoreZip` writes `${base}/${f.name}` straight from the zip entry names. A crafted zip with `../` entries could write outside the folder (zip-slip). Normalise the path and reject entries that leave the folder. |
-| 5 | App lock | 4-digit PIN with no attempt limit or back-off. It sits in secure storage but is compared in plain text. Fine for casual privacy, not strong protection. |
-| 6 | Widget count | "Bills this week" counts `days ≤ 7`, which includes overdue bills (negative days). They are counted both there and in "N overdue". |
-| 7 | Delete | Deleting a bill leaves its receipts and statements on disk (by design, and the dialog says so). There is no cleanup option. |
-| 8 | Notification cap | Capped at 400 scheduled reminders. With many bills and long windows, later ones are silently skipped. |
-| 9 | Platform | Android only. The storage paths (`/storage/emulated/0`) and the widgets are Android-specific. iOS would need separate work. |
-| 10 | Auto-backup | Runs only at app start, never in the background, and saves locally. It reaches Drive only through a manual share. |
-| 11 | Tests | Unit tests cover `logic.dart` and the JSON round-trip only. There are no widget or integration tests for notifications, files or backup. |
+| # | Area | Observation | Status |
+|---|---|---|---|
+| 1 | Reminders | Notifications are only re-planned when the app saves data or starts. If the app is not opened for about 6 weeks, the scheduled window runs out (last/this/next month, up to due + 14 days) and reminders stop coming. A periodic background job (WorkManager) would fix this. | Fixed: daily WorkManager re-plan, rolling 14-day horizon |
+| 2 | Cycle logic | `active()` and `openCycles()` look back only **one** month. A bill unpaid for 2 or more months back drops out of "attention" and reminders. It is only visible in the history as "Not marked paid". | Fixed: 3-month lookback, oldest unpaid month first |
+| 3 | Edit bill | Changing the due date updates only `dueDay`. `startKey` is never changed, so moving the first month earlier or later on edit has no effect. | Fixed: `newStartKey` on date change |
+| 4 | Restore security | `restoreZip` writes `${base}/${f.name}` straight from the zip entry names. A crafted zip with `../` entries could write outside the folder (zip-slip). Normalise the path and reject entries that leave the folder. | Fixed: `safeJoin` rejects unsafe entries |
+| 5 | App lock | 4-digit PIN with no attempt limit or back-off. It sits in secure storage but is compared in plain text. Fine for casual privacy, not strong protection. | Fixed: salted SHA-256, lockout after 5 tries (30 s up to 5 min) |
+| 6 | Widget count | "Bills this week" counts `days ≤ 7`, which includes overdue bills (negative days). They are counted both there and in "N overdue". | Fixed: `countDueWithin` shared with Home |
+| 7 | Delete | Deleting a bill leaves its receipts and statements on disk (by design, and the dialog says so). There is no cleanup option. | Fixed: optional delete-files checkbox |
+| 8 | Notification cap | Capped at 400 scheduled reminders. With many bills and long windows, later ones are silently skipped. | Fixed: earliest 400 kept, daily re-plan schedules the rest |
+| 9 | Platform | Android only. The storage paths (`/storage/emulated/0`) and the widgets are Android-specific. iOS would need separate work. | Out of scope |
+| 10 | Auto-backup | Runs only at app start, never in the background, and saves locally. It reaches Drive only through a manual share. | Partly fixed: auto-backup runs in the background; Drive upload is still a manual share |
+| 11 | Tests | Unit tests cover `logic.dart` and the JSON round-trip only. There are no widget or integration tests for notifications, files or backup. | Improved: 29 unit tests (was 8) |
 
 ---
 
